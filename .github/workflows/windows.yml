@@ -17,8 +17,8 @@ concurrency:
 jobs:
   windows:
     # windows-latest ya trae Visual Studio 2026, que Flutter 3.27 no reconoce.
-    # windows-2025 lleva Visual Studio 2022.
-    runs-on: windows-2025
+    # windows-2022 lleva Visual Studio 2022.
+    runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
 
