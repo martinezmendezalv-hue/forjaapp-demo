@@ -528,15 +528,16 @@ class _PantallaSocioState extends State<PantallaSocio> {
   }
 
   Widget _cuentaAtras(int restantes) {
-    final urgente = restantes <= 5;
+    const total = ForjaStore.segundosQr;
+    final urgente = restantes <= 1;
     return Row(mainAxisAlignment: MainAxisAlignment.center, children: [
       SizedBox(
         width: 48,
         height: 48,
         child: Stack(alignment: Alignment.center, children: [
           TweenAnimationBuilder<double>(
-            tween: Tween(end: restantes / 30),
-            duration: restantes == 30 ? Duration.zero : const Duration(seconds: 1),
+            tween: Tween(end: restantes / total),
+            duration: restantes == total ? Duration.zero : const Duration(seconds: 1),
             builder: (_, v, __) => SizedBox.expand(
               child: CircularProgressIndicator(
                 value: v,
@@ -559,9 +560,10 @@ class _PantallaSocioState extends State<PantallaSocio> {
       ),
       const SizedBox(width: Esp.m),
       Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text(urgente ? 'Se renueva ahora' : 'Se renueva en $restantes s',
+        Text(urgente ? 'Cambia ahora' : 'Cambia en $restantes s',
             style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 14)),
-        const Text('Una captura de pantalla no sirve', style: TextStyle(color: Forja.grisOscuro, fontSize: 12.5)),
+        const Text('Código nuevo cada $total s: una captura no sirve',
+            style: TextStyle(color: Forja.grisOscuro, fontSize: 12.5)),
       ]),
     ]);
   }

@@ -201,14 +201,18 @@ class _InicioState extends State<Inicio> {
             backgroundColor: Forja.hierro,
             child: SafeArea(child: _menu(cerrarAlElegir: true)),
           ),
-          body: seccion == 0
-              ? contenido
-              : SingleChildScrollView(
-                  // Los paneles de escritorio necesitan unos 1000 px: aquí se
-                  // desplazan en horizontal en vez de romperse.
-                  scrollDirection: Axis.horizontal,
-                  child: SizedBox(width: 1000, child: contenido),
-                ),
+          // SafeArea deja libre la barra de gestos de Android.
+          body: SafeArea(
+            top: false,
+            child: seccion == 0 || seccion == 2
+                ? contenido
+                : SingleChildScrollView(
+                    // Los paneles de escritorio necesitan unos 1000 px: aquí se
+                    // desplazan en horizontal en vez de romperse.
+                    scrollDirection: Axis.horizontal,
+                    child: SizedBox(width: 1000, child: contenido),
+                  ),
+          ),
         );
       }
       return Scaffold(

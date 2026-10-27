@@ -261,15 +261,31 @@ class ForjaStore extends ChangeNotifier {
 
   // ----------------------------------------------------------------- QR
 
-  /// RF-07: el código cambia cada 30 segundos.
-  int ventanaActual() => DateTime.now().millisecondsSinceEpoch ~/ 30000;
+  /// RF-07: el código cambia cada 5 segundos.
+  static const segundosQr = 5;
 
-  int segundosRestantesQr() => 30 - (DateTime.now().second % 30);
+  int ventanaActual() => DateTime.now().millisecondsSinceEpoch ~/ (segundosQr * 1000);
+
+  int segundosRestantesQr() => segundosQr - (DateTime.now().second % segundosQr);
 
   String tokenQr(int socioId, [int? ventana]) {
     final v = ventana ?? ventanaActual();
     final control = ((socioId * 7919) ^ (v * 104729)) % 99991;
     return 'FORJA-$socioId-$v-$control';
+  }
+
+  /// Cuántas ventanas de diferencia hay entre el código leído y el actual
+  /// (0 = vigente, 1 = el anterior...). Null si no es un QR de Forja válido.
+  /// No registra nada: sirve para que el lector de la cámara espere al
+  /// código nuevo si ha leído uno justo en el momento del cambio.
+  int? antiguedadQr(String token) {
+    final partes = token.split('-');
+    if (partes.length != 4 || partes[0] != 'FORJA') return null;
+    final id = int.tryParse(partes[1]);
+    final v = int.tryParse(partes[2]);
+    if (id == null || v == null || !socios.any((s) => s.id == id)) return null;
+    if (token != tokenQr(id, v)) return null;
+    return ventanaActual() - v;
   }
 
   /// Lo que haría el servidor al recibir el QR leído en la tablet de entrada.

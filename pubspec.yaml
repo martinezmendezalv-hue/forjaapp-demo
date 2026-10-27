@@ -7,9 +7,14 @@ environment:
   sdk: '>=3.4.0 <4.0.0'
 
 dependencies:
+  camera_platform_interface: ^2.9.0
+  camera_windows: ^0.2.6
   flutter:
     sdk: flutter
+  image: ^4.2.0
+  mobile_scanner: ^6.0.0
   qr_flutter: ^4.1.0
+  zxing2: ^0.2.3
 
 dev_dependencies:
   flutter_test:

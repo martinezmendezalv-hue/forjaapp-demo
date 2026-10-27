@@ -13,6 +13,7 @@ La idea de negocio: sustituir el WhatsApp, el Excel, el PC de las tarjetas y la 
 | **En el navegador** (sin instalar nada) | **https://martinezmendezalv-hue.github.io/forjaapp-demo/** |
 | **Windows: instalador** | [ForjaApp-Demo-Setup.exe](https://github.com/martinezmendezalv-hue/forjaapp-demo/releases/download/demo/ForjaApp-Demo-Setup.exe) |
 | **Windows: portable** (sin instalar) | [ForjaApp-Demo-portable.zip](https://github.com/martinezmendezalv-hue/forjaapp-demo/releases/download/demo/ForjaApp-Demo-portable.zip) |
+| **Android** (APK, sin Google Play) | [ForjaApp-Demo.apk](https://github.com/martinezmendezalv-hue/forjaapp-demo/releases/download/demo/ForjaApp-Demo.apk) |
 | Todas las descargas | [Releases → demo](https://github.com/martinezmendezalv-hue/forjaapp-demo/releases/tag/demo) |
 
 > [!WARNING]
@@ -21,7 +22,25 @@ La idea de negocio: sustituir el WhatsApp, el Excel, el PC de las tarjetas y la 
 
 Para la versión portable: descomprime el zip y abre `forja_app_demo.exe`.
 
+> [!NOTE]
+> **Android:** abre el enlace del APK desde el móvil, descárgalo y tócalo para instalarlo. Android pedirá permitir la instalación de apps de origen desconocido para el navegador o el gestor de archivos: es normal, porque la app no está en Google Play (subirla allí cuesta dinero). No hace falta cuenta ni pago.
+> En **iPhone** usa la versión web: funciona igual, cámara incluida.
+
 Todo funciona sin Internet y con datos de ejemplo: no hay servidor ni datos reales. Las clases son las de **hoy**, así que lo que puedes reservar depende de la hora a la que abras la demo.
+
+## Cómo enseñarla al público
+
+La demo más vistosa usa **dos dispositivos**: uno hace de **móvil del socio** y otro de **tablet del torno**.
+
+1. **Móvil del socio** (el APK o la web en un móvil): en *App del socio* elige a **Lucía Gómez** y abre la pestaña **Mi QR**. El código cambia cada **5 segundos** y la cuenta atrás lo muestra.
+2. **Tablet del torno** (el `.exe` en un portátil con webcam, o el APK o la web en otro móvil): abre **Punto de acceso** y pulsa **Escanear con la cámara**.
+3. Acerca el QR del primer móvil a la cámara: la pantalla se pone **verde** («Adelante, Lucía») y la entrada aparece en *Recepción → Últimas entradas*.
+4. Repite con **Raúl Fernández**: sale en **rojo** porque tiene un recibo pendiente.
+5. Haz una **captura de pantalla** del QR de Lucía, espera 10 segundos y enséñasela a la cámara: sale **«Código caducado»**. Ese es el motivo de que el código cambie cada 5 segundos.
+
+Para que el lector acepte los códigos, la **hora de los dos dispositivos debe coincidir** (en Windows: *Configuración → Hora e idioma → Fecha y hora → Sincronizar ahora*). Los móviles ya la sincronizan solos.
+
+Con **un solo dispositivo** también se puede: los botones de *Simular un socio en la puerta* (en el móvil, el botón **Simular**) hacen lo mismo sin cámara. Y la prueba de la lista de espera de la sección siguiente no necesita nada más.
 
 ## Las cuatro pantallas
 
@@ -34,7 +53,9 @@ Todo funciona sin Internet y con datos de ejemplo: no hay servidor ni datos real
 
 <p align="center"><img src="docs/capturas/qr.png" width="300" alt="Pase de entrada con QR y cuenta atrás"></p>
 
-**App del socio** (dentro de un marco de móvil): clases de hoy con monitor, plazas y estado, reservas, lista de espera con ascenso automático, avisos y el **pase QR a pantalla completa que cambia cada 30 segundos**.
+**App del socio** (dentro de un marco de móvil en el ordenador, a pantalla completa en el teléfono): clases de hoy con monitor, plazas y estado, reservas, lista de espera con ascenso automático, avisos y el **pase QR a pantalla completa que cambia cada 5 segundos**.
+
+**Punto de acceso con cámara:** en el móvil, en la web y en Windows el botón *Escanear con la cámara* abre la cámara y lee el QR del socio. En Android, iPhone y la web usa `mobile_scanner`; en Windows hace fotos con la webcam y las lee con `zxing2`.
 
 ### Prueba recomendada
 
@@ -56,14 +77,14 @@ En la web se puede abrir cada sección directamente: [`?seccion=recepcion`](http
 ## Cómo está hecha
 
 - **Flutter 3.27** (Dart), el mismo framework que usaría la app real del socio en Android e iOS.
-- El paquete `qr_flutter` dibuja el QR.
-- **GitHub Actions** (`.github/workflows/windows.yml`) compila en cada cambio: la versión de Windows con su instalador de **Inno Setup**, que se publica en la release `demo`, y la versión web, que se publica en **GitHub Pages**.
+- El paquete `qr_flutter` dibuja el QR; `mobile_scanner`, `camera_windows` y `zxing2` lo leen con la cámara.
+- **GitHub Actions** (`.github/workflows/windows.yml`) compila en cada cambio la versión de Windows con su instalador de **Inno Setup**, el **APK de Android** y la versión web. Los dos primeros se publican en la release `demo` y la web en **GitHub Pages**.
 
 En el proyecto real, los datos vendrían de una API REST en Java 21 + Spring Boot 3 con PostgreSQL; en la demo todo vive en memoria (`lib/data/store.dart`).
 
 ## Compilar en tu PC
 
-Necesitas Flutter 3.27 y, para Windows, Visual Studio con «Desarrollo para el escritorio con C++».
+Necesitas Flutter 3.27; para Windows, Visual Studio 2022 con «Desarrollo para el escritorio con C++» y el **Modo de desarrollador** de Windows activado (los plugins de cámara lo necesitan); para Android, el SDK de Android y un JDK 17.
 
 ```
 flutter create --platforms=windows --org es.forja --project-name forja_app_demo .
@@ -71,7 +92,7 @@ flutter test
 flutter run -d windows
 ```
 
-Para la web: `flutter run -d chrome`.
+Para Android: `flutter build apk --release`. Para la web: `flutter run -d chrome`.
 
 ---
 Álvaro Martínez · Módulo de Proyecto · 2.º DAM · curso 2026/27

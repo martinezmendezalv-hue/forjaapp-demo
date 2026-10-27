@@ -1,4 +1,4 @@
-name: Compilar demo (Windows y web)
+name: Compilar demo (Windows, Android y web)
 
 on:
   push:
@@ -65,20 +65,66 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: ForjaApp-Demo
+          name: windows
           path: |
             installer/Output/ForjaApp-Demo-Setup.exe
             ForjaApp-Demo-portable.zip
 
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.27.4
+          channel: stable
+          cache: true
+
+      - run: flutter pub get
+
+      - name: Pruebas
+        run: flutter test
+
+      - name: Compilar el APK
+        run: |
+          flutter build apk --release
+          cp build/app/outputs/flutter-apk/app-release.apk ForjaApp-Demo.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android
+          path: ForjaApp-Demo.apk
+
+  publicar:
+    needs: [windows, android]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+
       - name: Publicar en Releases
-        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
           gh release delete demo --yes --cleanup-tag || true
-          gh release create demo installer/Output/ForjaApp-Demo-Setup.exe ForjaApp-Demo-portable.zip \
-            --title "ForjaApp - demo para Windows" \
-            --notes "Instalador: ForjaApp-Demo-Setup.exe. Sin instalar: descomprime ForjaApp-Demo-portable.zip y abre forja_app_demo.exe. Windows puede mostrar SmartScreen porque el ejecutable no está firmado: Más información → Ejecutar de todas formas. Versión web: https://${GITHUB_REPOSITORY_OWNER}.github.io/forjaapp-demo/ · Compilado automáticamente desde ${GITHUB_SHA::7}."
+          gh release create demo ForjaApp-Demo-Setup.exe ForjaApp-Demo-portable.zip ForjaApp-Demo.apk \
+            --target "$GITHUB_SHA" \
+            --title "ForjaApp - demo para Windows y Android" \
+            --notes "**Windows:** ForjaApp-Demo-Setup.exe (instalador) o ForjaApp-Demo-portable.zip (sin instalar: descomprime y abre forja_app_demo.exe). SmartScreen avisará porque no está firmado: Más información → Ejecutar de todas formas.
+
+          **Android:** ForjaApp-Demo.apk. Ábrelo en el móvil y permite instalar apps de origen desconocido. No necesita Google Play ni cuenta de pago.
+
+          **Web:** https://${GITHUB_REPOSITORY_OWNER}.github.io/forjaapp-demo/
+
+          Compilado automáticamente desde ${GITHUB_SHA::7}."
 
   web:
     runs-on: ubuntu-latest
