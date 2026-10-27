@@ -61,13 +61,15 @@ jobs:
 
       - name: Crear la versión portable (zip)
         shell: pwsh
-        run: Compress-Archive -Path build\windows\x64\runner\Release\* -DestinationPath ForjaApp-Demo-portable.zip
+        run: |
+          Compress-Archive -Path build\windows\x64\runner\Release\* -DestinationPath ForjaApp-Demo-portable.zip
+          Copy-Item installer\Output\ForjaApp-Demo-Setup.exe .
 
       - uses: actions/upload-artifact@v4
         with:
           name: windows
           path: |
-            installer/Output/ForjaApp-Demo-Setup.exe
+            ForjaApp-Demo-Setup.exe
             ForjaApp-Demo-portable.zip
 
   android:
@@ -75,7 +77,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: 17
