@@ -1,0 +1,35 @@
+{
+    "name": "ForjaApp · Forja Training Club",
+    "short_name": "ForjaApp",
+    "start_url": ".",
+    "display": "standalone",
+    "background_color": "#15181D",
+    "theme_color": "#15181D",
+    "description": "Demo de reservas, accesos con QR y fichajes de un gimnasio.",
+    "orientation": "portrait-primary",
+    "prefer_related_applications": false,
+    "icons": [
+        {
+            "src": "icons/Icon-192.png",
+            "sizes": "192x192",
+            "type": "image/png"
+        },
+        {
+            "src": "icons/Icon-512.png",
+            "sizes": "512x512",
+            "type": "image/png"
+        },
+        {
+            "src": "icons/Icon-maskable-192.png",
+            "sizes": "192x192",
+            "type": "image/png",
+            "purpose": "maskable"
+        },
+        {
+            "src": "icons/Icon-maskable-512.png",
+            "sizes": "512x512",
+            "type": "image/png",
+            "purpose": "maskable"
+        }
+    ]
+}
