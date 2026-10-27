@@ -5,6 +5,15 @@ plugins {
     id "dev.flutter.flutter-gradle-plugin"
 }
 
+// Clave de firma fija de ForjaApp. Con la misma firma, un APK nuevo se
+// instala encima del anterior sin desinstalar. key.properties no se sube a
+// git: en GitHub Actions se crea a partir de los secretos del repositorio.
+def clave = new Properties()
+def ficheroClave = rootProject.file("key.properties")
+if (ficheroClave.exists()) {
+    ficheroClave.withReader("UTF-8") { clave.load(it) }
+}
+
 android {
     namespace = "es.forja.forja_app_demo"
     compileSdk = flutter.compileSdkVersion
@@ -30,11 +39,22 @@ android {
         versionName = flutter.versionName
     }
 
+    signingConfigs {
+        if (ficheroClave.exists()) {
+            release {
+                storeFile = file(clave["storeFile"])
+                storePassword = clave["storePassword"]
+                keyAlias = clave["keyAlias"]
+                keyPassword = clave["keyPassword"]
+            }
+        }
+    }
+
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.debug
+            // Sin key.properties (por ejemplo, alguien que clona el repo) se
+            // firma con la clave de depuración para que siga compilando.
+            signingConfig = ficheroClave.exists() ? signingConfigs.release : signingConfigs.debug
         }
     }
 }

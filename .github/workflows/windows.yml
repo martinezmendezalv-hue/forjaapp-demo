@@ -93,9 +93,26 @@ jobs:
       - name: Pruebas
         run: flutter test
 
+      - name: Clave de firma fija
+        env:
+          CLAVE: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          PASS_ALMACEN: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          PASS_CLAVE: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          if [ -z "$CLAVE" ]; then
+            echo "::warning::Faltan los secretos de firma: el APK sale con una clave de prueba y no se podrá instalar encima de la versión anterior."
+            exit 0
+          fi
+          echo "$CLAVE" | base64 -d > android/app/forja-release.jks
+          printf 'storePassword=%s\nkeyPassword=%s\nkeyAlias=%s\nstoreFile=forja-release.jks\n' \
+            "$PASS_ALMACEN" "$PASS_CLAVE" "$ALIAS" > android/key.properties
+
       - name: Compilar el APK
         run: |
-          flutter build apk --release
+          # El número de compilación crece en cada ejecución: Android solo
+          # actualiza si la versión nueva no es menor que la instalada.
+          flutter build apk --release --build-number=${{ github.run_number }}
           cp build/app/outputs/flutter-apk/app-release.apk ForjaApp-Demo.apk
 
       - uses: actions/upload-artifact@v4
