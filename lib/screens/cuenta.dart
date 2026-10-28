@@ -230,11 +230,14 @@ class Captcha extends StatefulWidget {
 }
 
 class _CaptchaState extends State<Captcha> {
-  late String _servidor = sesion.servidor;
+  // Se lee al crear el widget (no con `late` perezoso: se leería por
+  // primera vez ya con el servidor nuevo y nunca se notaría el cambio).
+  late String _servidor;
 
   @override
   void initState() {
     super.initState();
+    _servidor = sesion.servidor;
     sesion.addListener(_alCambiarSesion);
     widget.controller.nuevo();
   }
