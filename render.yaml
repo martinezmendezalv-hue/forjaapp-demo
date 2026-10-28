@@ -5,7 +5,9 @@ services:
     name: forjaapp-servidor
     runtime: docker
     plan: free
-    region: frankfurt
+    # Misma región que la base de datos de Neon (AWS us-east-1): cada
+    # petición hace varias consultas y así no cruzan el Atlántico.
+    region: virginia
     dockerfilePath: ./Dockerfile
     healthCheckPath: /api/salud
     autoDeploy: true
