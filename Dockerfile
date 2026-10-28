@@ -11,7 +11,7 @@ RUN flutter pub get && cd servidor && flutter pub get
 
 COPY . .
 RUN flutter build web --release --base-href /
-RUN cd servidor && dart compile exe bin/servidor.dart -o /out/servidor
+RUN mkdir -p /out && cd servidor && dart compile exe bin/servidor.dart -o /out/servidor
 
 FROM debian:bookworm-slim
 RUN apt-get update \
