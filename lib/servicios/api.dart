@@ -232,6 +232,16 @@ class ForjaApi {
 
   Future<String> csv() async => await _pedir('GET', '/api/fichajes.csv', texto: true) as String;
 
+  /// Socios reales y entradas desde el inicio del día de este equipo.
+  Future<Map<String, dynamic>> recepcion() async {
+    final hoy = DateTime.now();
+    final desde = DateTime(hoy.year, hoy.month, hoy.day).toUtc().toIso8601String();
+    return await _pedir('GET', '/api/recepcion?desde=${Uri.encodeQueryComponent(desde)}') as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> accesoManual(int socioId) async =>
+      await _pedir('POST', '/api/acceso/manual', cuerpo: {'usuarioId': socioId}) as Map<String, dynamic>;
+
   Future<Map<String, dynamic>> validarAcceso(String pase) async =>
       await _pedir('POST', '/api/acceso', cuerpo: {'token': pase}) as Map<String, dynamic>;
 }

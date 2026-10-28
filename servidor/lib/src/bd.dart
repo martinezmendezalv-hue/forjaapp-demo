@@ -211,6 +211,24 @@ abstract class BaseDatos {
 
   // ----------------------------------------------------------- accesos
 
+  /// Socios con su última entrada (por QR o manual) para recepción.
+  Future<List<Fila>> socios() => consulta('''
+      SELECT u.id, u.nombre, u.email, u.plan, u.plan_desde, u.creado,
+        (SELECT MAX(a.fecha) FROM accesos a
+          WHERE a.usuario_id = u.id AND a.resultado IN ('concedido', 'manual')) AS ultima_entrada
+      FROM usuarios u WHERE u.rol = 'socio'
+      ORDER BY u.nombre
+    ''');
+
+  /// Intentos de entrada desde [desde] (lo más reciente primero).
+  Future<List<Fila>> accesosDesde(String desde, {int limite = 200}) => consulta('''
+      SELECT a.id, a.usuario_id, a.resultado, a.fecha, u.nombre AS nombre, u.plan AS plan
+      FROM accesos a LEFT JOIN usuarios u ON u.id = a.usuario_id
+      WHERE a.fecha >= ?
+      ORDER BY a.fecha DESC, a.id DESC
+      LIMIT ?
+    ''', [desde, limite]);
+
   Future<void> registrarAcceso({int? usuarioId, required String resultado, required int lectorId}) => insertar(
         'INSERT INTO accesos (usuario_id, resultado, fecha, lector_id) VALUES (?, ?, ?, ?)',
         [usuarioId, resultado, ahoraIso(), lectorId],

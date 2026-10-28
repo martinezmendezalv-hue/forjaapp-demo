@@ -291,6 +291,39 @@ void main() {
     expect(r.statusCode, 503);
   });
 
+  test('recepción: socios reales, entradas de hoy y entrada manual', () async {
+    final admin = await entrar(correoAdmin, 'alvaro');
+    await registrar('lucia@forja.es');
+    final pablo = await registrar('pablo@forja.es', nombre: 'Pablo Ruiz');
+    await pedir('POST', '/api/suscripcion', cuerpo: {'plan': 'premium'}, token: pablo);
+    final idLucia = (await bd.usuarioPorCorreo('lucia@forja.es'))!['id'] as int;
+    final idPablo = (await bd.usuarioPorCorreo('pablo@forja.es'))!['id'] as int;
+
+    // Sin plan no pasa; con plan, sí.
+    final sinPlan = await pedir('POST', '/api/acceso/manual', cuerpo: {'usuarioId': idLucia}, token: admin);
+    expect(sinPlan.json['resultado'], 'cuotaPendiente');
+    final conPlan = await pedir('POST', '/api/acceso/manual', cuerpo: {'usuarioId': idPablo}, token: admin);
+    expect(conPlan.estado, 201);
+    expect(conPlan.json['resultado'], 'manual');
+
+    final r = await pedir('GET', '/api/recepcion', token: admin);
+    expect(r.estado, 200, reason: r.texto);
+    expect(r.json['resumen']['socios'], 2);
+    expect(r.json['resumen']['conPlan'], 1);
+    expect(r.json['resumen']['entradasHoy'], 1);
+    expect(r.json['resumen']['rechazosHoy'], 1);
+    expect((r.json['socios'] as List).map((s) => s['nombre']), ['Lucía Gómez', 'Pablo Ruiz']);
+    expect((r.json['accesos'] as List).first['nombre'], 'Pablo Ruiz');
+
+    // Un trabajador también lo ve; un socio, no. Gerencia no es un socio.
+    await crearTrabajador(admin, 'ana@forja.es');
+    final ana = await entrar('ana@forja.es', 'Trabajo12');
+    expect((await pedir('GET', '/api/recepcion', token: ana)).estado, 200);
+    expect((await pedir('GET', '/api/recepcion', token: pablo)).estado, 403);
+    final idAdmin = (await bd.usuarioPorCorreo(correoAdmin))!['id'] as int;
+    expect((await pedir('POST', '/api/acceso/manual', cuerpo: {'usuarioId': idAdmin}, token: ana)).estado, 404);
+  });
+
   test('el CSV neutraliza fórmulas de hoja de cálculo', () async {
     final admin = await entrar(correoAdmin, 'alvaro');
     await crearTrabajador(admin, 'x@forja.es', nombre: '=HYPERLINK("http://x")');

@@ -9,7 +9,6 @@ import 'screens/gerencia.dart';
 import 'screens/pase.dart';
 import 'screens/planes.dart';
 import 'screens/recepcion.dart';
-import 'screens/socio.dart';
 import 'servicios/api.dart';
 import 'servicios/sesion.dart' show sesion;
 import 'theme.dart';
@@ -163,7 +162,6 @@ class _Bienvenida extends StatelessWidget {
 /// comodidad: el servidor vuelve a comprobar el rol en cada petición.
 enum _Seccion {
   pase('pase', Icons.qr_code_2_outlined, Icons.qr_code_2_rounded, 'Mi pase', 'QR de entrada', {'socio'}),
-  socio('socio', Icons.smartphone_outlined, Icons.smartphone_rounded, 'App del socio', 'Demo de reservas', {'admin'}),
   recepcion('recepcion', Icons.space_dashboard_outlined, Icons.space_dashboard_rounded, 'Recepción',
       'Ocupación y socios', {'admin', 'trabajador'}),
   acceso('acceso', Icons.qr_code_scanner_outlined, Icons.qr_code_scanner_rounded, 'Punto de acceso', 'Tablet del torno',
@@ -225,9 +223,8 @@ class _InicioState extends State<Inicio> {
 
   Widget _pantalla() => switch (seccion) {
         _Seccion.pase => PantallaPase(verPlanes: () => _ir(_Seccion.planes)),
-        _Seccion.socio => PantallaSocio(store: widget.store),
-        _Seccion.recepcion => PantallaRecepcion(store: widget.store, altas: u.esAdmin),
-        _Seccion.acceso => PantallaAcceso(store: widget.store),
+        _Seccion.recepcion => const PantallaRecepcion(),
+        _Seccion.acceso => const PantallaAcceso(),
         _Seccion.fichajes => const PantallaFichajes(),
         _Seccion.usuarios => const PantallaUsuarios(),
         _Seccion.mensajes => const PantallaMensajes(),

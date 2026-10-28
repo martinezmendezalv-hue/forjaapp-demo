@@ -84,6 +84,8 @@ class ForjaApi {
       ..post('/api/fichajes/<id|[0-9]{1,9}>/correccion', _corregir)
       ..get('/api/fichajes.csv', _csv)
       ..post('/api/acceso', _validarAcceso)
+      ..post('/api/acceso/manual', _accesoManual)
+      ..get('/api/recepcion', _recepcion)
       ..all('/api/<resto|.*>', (Request _) => _json(404, {'error': 'No existe esa ruta.'}));
     return r.call;
   }
@@ -619,6 +621,70 @@ class ForjaApi {
         return _json(200, {
           'resultado': resultado,
           'socio': {'id': uid, 'nombre': socio['nombre'], 'plan': socio['plan']},
+        });
+      });
+
+  // ------------------------------------------------------------ recepción
+
+  /// Socios reales y entradas del día. [desde] es el inicio del día del
+  /// equipo que pregunta (cada uno está en su zona horaria).
+  Future<Response> _recepcion(Request req) => _seguro(req, () async {
+        await _sesion(req, roles: ['admin', 'trabajador']);
+        final pedido = DateTime.tryParse(req.url.queryParameters['desde'] ?? '');
+        final ahora = DateTime.now().toUtc();
+        // Como mucho, las últimas 36 horas.
+        final desde = pedido == null || pedido.isBefore(ahora.subtract(const Duration(hours: 36)))
+            ? ahora.subtract(const Duration(hours: 24))
+            : pedido.toUtc();
+        final socios = await bd.socios();
+        final accesos = await bd.accesosDesde(desde.toIso8601String());
+        final entradas = accesos.where((a) => a['resultado'] == 'concedido' || a['resultado'] == 'manual');
+        return _json(200, {
+          'resumen': {
+            'socios': socios.length,
+            'conPlan': socios.where((s) => s['plan'] != null).length,
+            'entradasHoy': entradas.length,
+            'personasHoy': entradas.map((a) => a['usuario_id']).toSet().length,
+            'rechazosHoy': accesos.length - entradas.length,
+          },
+          'socios': [
+            for (final s in socios)
+              {
+                'id': s['id'],
+                'nombre': s['nombre'],
+                'email': s['email'],
+                'plan': s['plan'],
+                'creado': s['creado'],
+                'ultimaEntrada': s['ultima_entrada'],
+              }
+          ],
+          'accesos': [
+            for (final a in accesos.take(50))
+              {
+                'usuarioId': a['usuario_id'],
+                'nombre': a['nombre'],
+                'plan': a['plan'],
+                'resultado': a['resultado'],
+                'fecha': a['fecha'],
+              }
+          ],
+        });
+      });
+
+  /// Entrada registrada a mano desde recepción (sin móvil o sin internet).
+  Future<Response> _accesoManual(Request req) => _seguro(req, () async {
+        final lector = await _sesion(req, roles: ['admin', 'trabajador']);
+        final d = await _cuerpo(req);
+        final id = d['usuarioId'];
+        if (id is! int) throw ErrorApi(400, 'Elige un socio.');
+        final socio = await bd.usuarioPorId(id);
+        if (socio == null || socio['rol'] != 'socio') throw ErrorApi(404, 'Ese socio no existe.');
+        final resultado = socio['plan'] == null ? 'cuotaPendiente' : 'manual';
+        await bd.registrarAcceso(usuarioId: id, resultado: resultado, lectorId: lector['id'] as int);
+        alRegistrar?.call('Entrada manual (#$id): $resultado');
+        return _json(201, {
+          'resultado': resultado,
+          'socio': {'id': id, 'nombre': socio['nombre'], 'plan': socio['plan']},
         });
       });
 }

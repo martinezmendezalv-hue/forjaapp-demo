@@ -2,24 +2,31 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
-import '../data/store.dart';
-import '../servicios/api.dart' show ErrorServidor;
+import '../servicios/api.dart' show ErrorServidor, segundosQr;
 import '../servicios/sesion.dart' show sesion;
 import '../theme.dart';
 import '../widgets/escaner.dart';
-import 'recepcion.dart' show estadoAcceso;
+import 'recepcion.dart' show estadoAcceso, horaDe;
 
+/// Tablet del torno: lee el pase QR de cada socio y lo comprueba con el
+/// servidor. Si alguien no trae el móvil, se registra su entrada a mano.
 class PantallaAcceso extends StatefulWidget {
-  const PantallaAcceso({super.key, required this.store});
-  final ForjaStore store;
+  const PantallaAcceso({super.key});
 
   @override
   State<PantallaAcceso> createState() => _PantallaAccesoState();
 }
 
+/// Lo que se enseña en la tablet tras leer un pase.
+class _Lectura {
+  _Lectura(this.nombre, this.resultado) : momento = DateTime.now();
+  final String nombre;
+  final String resultado;
+  final DateTime momento;
+}
+
 class _PantallaAccesoState extends State<PantallaAcceso> with TickerProviderStateMixin {
-  Acceso? ultimo;
-  int manualId = 5;
+  _Lectura? ultimo;
 
   /// Lector con la cámara encendido.
   bool camara = false;
@@ -32,11 +39,13 @@ class _PantallaAccesoState extends State<PantallaAcceso> with TickerProviderStat
   int? _ultimoSocio;
   DateTime _horaUltimo = DateTime(2000);
 
-  /// Desde cuándo se está viendo un código que no es el vigente.
-  DateTime? _viendoAntiguo;
-
   /// Tamaños reducidos cuando la tablet ocupa la pantalla de un móvil.
   bool _compacto = false;
+
+  /// Socios reales y últimos intentos (para la entrada manual y el historial).
+  List<Map<String, dynamic>> socios = [];
+  List<Map<String, dynamic>> intentos = [];
+  int? manualId;
 
   /// Tiempo que se muestra el resultado antes de volver a "Acerca tu QR".
   late final AnimationController _reinicio = AnimationController(vsync: this, duration: const Duration(seconds: 5))
@@ -48,7 +57,11 @@ class _PantallaAccesoState extends State<PantallaAcceso> with TickerProviderStat
   late final AnimationController _escaner =
       AnimationController(vsync: this, duration: const Duration(milliseconds: 1800))..repeat(reverse: true);
 
-  ForjaStore get st => widget.store;
+  @override
+  void initState() {
+    super.initState();
+    _cargar();
+  }
 
   @override
   void dispose() {
@@ -58,9 +71,24 @@ class _PantallaAccesoState extends State<PantallaAcceso> with TickerProviderStat
     super.dispose();
   }
 
-  void _mostrar(Acceso a) {
-    setState(() => ultimo = a);
+  Future<void> _cargar() async {
+    try {
+      final d = await sesion.api.recepcion();
+      if (!mounted) return;
+      setState(() {
+        socios = (d['socios'] as List).cast<Map<String, dynamic>>();
+        intentos = (d['accesos'] as List).cast<Map<String, dynamic>>().take(5).toList();
+        if (!socios.any((s) => s['id'] == manualId)) manualId = socios.isEmpty ? null : socios.first['id'] as int;
+      });
+    } on ErrorServidor catch (e) {
+      if (e.sesionCaducada) await sesion.salir();
+    }
+  }
+
+  void _mostrar(_Lectura l) {
+    setState(() => ultimo = l);
     _reinicio.forward(from: 0);
+    _cargar();
   }
 
   void _alternarCamara() {
@@ -83,33 +111,16 @@ class _PantallaAccesoState extends State<PantallaAcceso> with TickerProviderStat
   /// Llega un texto leído por la cámara.
   void _leido(String token) {
     if (ultimo != null) return; // se está enseñando un resultado
-    if (token.startsWith('FORJA2-')) {
-      _leidoServidor(token);
-      return;
-    }
-    final edad = st.antiguedadQr(token);
-    if (edad == null) {
+    if (!token.startsWith('FORJA2-')) {
       if (pista == null) _avisar('Ese QR no es un pase de ForjaApp');
       return;
     }
-    final socio = int.parse(token.split('-')[1]);
-    if (socio == _ultimoSocio && DateTime.now().difference(_horaUltimo) < const Duration(seconds: 8)) return;
-    if (edad != 0) {
-      // Puede ser el código de hace un instante (justo ha cambiado) o una
-      // captura de pantalla: se espera un poco al código nuevo antes de
-      // darlo por caducado.
-      _viendoAntiguo ??= DateTime.now();
-      if (DateTime.now().difference(_viendoAntiguo!) < const Duration(seconds: 3)) return;
-    }
-    _viendoAntiguo = null;
-    _ultimoSocio = socio;
-    _horaUltimo = DateTime.now();
-    _mostrar(st.validarQr(token));
+    _leidoServidor(token);
   }
 
   bool _validando = false;
 
-  /// Pase de un socio con cuenta: lo comprueba ForjaApp Servidor.
+  /// El pase lo comprueba siempre el servidor (firma, caducidad y plan).
   Future<void> _leidoServidor(String token) async {
     if (_validando) return;
     final uid = int.tryParse(token.split('-').elementAtOrNull(1) ?? '');
@@ -118,20 +129,14 @@ class _PantallaAccesoState extends State<PantallaAcceso> with TickerProviderStat
     try {
       final r = await sesion.api.validarAcceso(token);
       if (!mounted) return;
-      final resultado = switch (r['resultado']) {
-        'concedido' => ResultadoAcceso.concedido,
-        'cuotaPendiente' => ResultadoAcceso.cuotaPendiente,
-        'qrCaducado' => ResultadoAcceso.qrCaducado,
-        _ => null,
-      };
       final socio = r['socio'];
-      if (resultado == null || socio is! Map) {
+      if (r['resultado'] == 'desconocido' || socio is! Map) {
         _avisar('Ese QR no es un pase de ForjaApp');
         return;
       }
       _ultimoSocio = uid;
       _horaUltimo = DateTime.now();
-      _mostrar(st.accesoDelServidor(id: socio['id'] as int, nombre: socio['nombre'] as String, resultado: resultado));
+      _mostrar(_Lectura(socio['nombre'] as String, r['resultado'] as String));
     } on ErrorServidor catch (e) {
       if (mounted) _avisar(e.mensaje);
     } finally {
@@ -139,52 +144,61 @@ class _PantallaAccesoState extends State<PantallaAcceso> with TickerProviderStat
     }
   }
 
+  Future<void> _manual([int? id]) async {
+    final elegido = id ?? manualId;
+    if (elegido == null) return;
+    try {
+      final r = await sesion.api.accesoManual(elegido);
+      if (!mounted) return;
+      _mostrar(_Lectura((r['socio'] as Map)['nombre'] as String, r['resultado'] as String));
+    } on ErrorServidor catch (e) {
+      if (mounted) _avisar(e.mensaje);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    return ListenableBuilder(
-      listenable: st,
-      builder: (context, _) => LayoutBuilder(builder: (context, c) {
-        if (c.maxWidth < 760) {
-          // En un móvil la tablet ocupa toda la pantalla y el resto va en botones.
-          return Padding(
-            padding: const EdgeInsets.all(Esp.m),
-            child: Column(children: [
-              Expanded(child: _tablet()),
-              const SizedBox(height: Esp.m),
-              Row(children: [
-                Expanded(
-                  child: FilledButton.icon(
-                    onPressed: _alternarCamara,
-                    icon: Icon(camara ? Icons.no_photography_outlined : Icons.qr_code_scanner_rounded, size: 20),
-                    label: Text(camara ? 'Cerrar la cámara' : 'Escanear con la cámara'),
-                  ),
-                ),
-                const SizedBox(width: Esp.s),
-                OutlinedButton.icon(
-                  onPressed: () => _hojaSimulador(context),
-                  icon: const Icon(Icons.tune_rounded, size: 20),
-                  label: const Text('Simular'),
-                ),
-              ]),
-            ]),
-          );
-        }
+    return LayoutBuilder(builder: (context, c) {
+      if (c.maxWidth < 760) {
+        // En un móvil la tablet ocupa toda la pantalla y el resto va en botones.
         return Padding(
-          padding: const EdgeInsets.fromLTRB(Esp.xxl, Esp.xl, Esp.xxl, Esp.xl),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            const CabeceraPanel(antetitulo: 'Punto de acceso · entrada principal', titulo: 'Tablet del torno'),
-            const SizedBox(height: Esp.xl),
-            Expanded(
-              child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                Expanded(child: _tablet()),
-                const SizedBox(width: Esp.xl),
-                SizedBox(width: 380, child: _simulador()),
-              ]),
-            ),
+          padding: const EdgeInsets.all(Esp.m),
+          child: Column(children: [
+            Expanded(child: _tablet()),
+            const SizedBox(height: Esp.m),
+            Row(children: [
+              Expanded(
+                child: FilledButton.icon(
+                  onPressed: _alternarCamara,
+                  icon: Icon(camara ? Icons.no_photography_outlined : Icons.qr_code_scanner_rounded, size: 20),
+                  label: Text(camara ? 'Cerrar la cámara' : 'Escanear con la cámara'),
+                ),
+              ),
+              const SizedBox(width: Esp.s),
+              OutlinedButton.icon(
+                onPressed: () => _hojaManual(context),
+                icon: const Icon(Icons.how_to_reg_rounded, size: 20),
+                label: const Text('Manual'),
+              ),
+            ]),
           ]),
         );
-      }),
-    );
+      }
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(Esp.xxl, Esp.xl, Esp.xxl, Esp.xl),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const CabeceraPanel(antetitulo: 'Punto de acceso · entrada principal', titulo: 'Tablet del torno'),
+          const SizedBox(height: Esp.xl),
+          Expanded(
+            child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              Expanded(child: _tablet()),
+              const SizedBox(width: Esp.xl),
+              SizedBox(width: 380, child: _lateral()),
+            ]),
+          ),
+        ]),
+      );
+    });
   }
 
   // ------------------------------------------------------------- tablet
@@ -273,7 +287,7 @@ class _PantallaAccesoState extends State<PantallaAcceso> with TickerProviderStat
         const SizedBox(height: Esp.s),
         const Padding(
           padding: EdgeInsets.symmetric(horizontal: Esp.l),
-          child: Text('El código cambia cada ${ForjaStore.segundosQr} s: vale el que está en pantalla ahora',
+          child: Text('El código cambia cada $segundosQr s: vale el que está en pantalla ahora',
               textAlign: TextAlign.center, style: TextStyle(color: Forja.grisClaro, fontSize: 13)),
         ),
         SizedBox(height: _compacto ? Esp.l : Esp.xl),
@@ -329,7 +343,7 @@ class _PantallaAccesoState extends State<PantallaAcceso> with TickerProviderStat
                         fontWeight: FontWeight.w700,
                         color: Colors.white)),
                 const SizedBox(height: Esp.s),
-                const Text('Abre ForjaApp y entra en Mi QR',
+                const Text('Abre ForjaApp y entra en Mi pase',
                     textAlign: TextAlign.center, style: TextStyle(fontSize: 18, color: Forja.grisClaro)),
                 if (!_compacto) ...[
                   const SizedBox(height: Esp.xl),
@@ -351,36 +365,36 @@ class _PantallaAccesoState extends State<PantallaAcceso> with TickerProviderStat
     );
   }
 
-  Widget _resultado(Acceso r) {
-    final nombre = r.socio.nombre.split(' ').first;
+  Widget _resultado(_Lectura r) {
+    final nombre = r.nombre.split(' ').first;
     final (Color fondo, Color texto, IconData icono, String titulo, String detalle) = switch (r.resultado) {
-      ResultadoAcceso.concedido => (
+      'concedido' => (
           Forja.verde,
           Colors.white,
           Icons.check_rounded,
           'Adelante, $nombre',
           'Torno abierto · ${horaSeg(r.momento)}'
         ),
-      ResultadoAcceso.manual => (
+      'manual' => (
           Forja.temple,
           Colors.white,
           Icons.how_to_reg_rounded,
           'Entrada registrada',
-          '${r.socio.nombre} · registrada desde recepción'
+          '${r.nombre} · registrada desde recepción'
         ),
-      ResultadoAcceso.cuotaPendiente => (
+      'cuotaPendiente' => (
           Forja.rojo,
           Colors.white,
           Icons.block_rounded,
           'Pasa por recepción',
-          '$nombre, tienes un recibo pendiente'
+          '$nombre, todavía no tienes un plan'
         ),
-      ResultadoAcceso.qrCaducado => (
+      _ => (
           Forja.paja,
           Forja.tinta,
           Icons.timer_off_outlined,
           'Código caducado',
-          'Ese QR ya no vale. Vuelve a abrir Mi QR en la app'
+          'Ese QR ya no vale. Vuelve a abrir Mi pase en la app'
         ),
     };
     return ColoredBox(
@@ -457,17 +471,15 @@ class _PantallaAccesoState extends State<PantallaAcceso> with TickerProviderStat
     );
   }
 
-  // ---------------------------------------------------------- simulador
+  // -------------------------------------------------------------- lateral
 
-  Widget _simulador() {
-    final ventanaAnterior = st.ventanaActual() - 1;
-    final intentos = ([...st.accesos]..sort((a, b) => b.momento.compareTo(a.momento))).take(4).toList();
+  Widget _lateral() {
     return ListView(children: [
       Tarjeta(
         padding: const EdgeInsets.all(20),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          const TituloBloque('Lector con cámara',
-              apoyo: 'Abre Mi QR en otro móvil con ForjaApp y enséñaselo a la cámara.'),
+          const TituloBloque('Lector con la cámara',
+              apoyo: 'El socio abre Mi pase en su móvil y lo enseña a la cámara.'),
           const SizedBox(height: Esp.m),
           SizedBox(
             width: double.infinity,
@@ -489,50 +501,43 @@ class _PantallaAccesoState extends State<PantallaAcceso> with TickerProviderStat
       Tarjeta(
         padding: const EdgeInsets.all(20),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          const TituloBloque('Simular un socio en la puerta',
-              apoyo: 'Cada opción acerca al lector el QR que ese socio lleva ahora en el móvil.'),
+          const TituloBloque('Entrada manual', apoyo: 'Si el socio no trae el móvil. Solo pasa si tiene plan.'),
           const SizedBox(height: Esp.m),
-          _opcion('Lucía Gómez', 'Cuota al día', Icons.check_circle_outline_rounded, Forja.verde, Forja.verdeSuave,
-              () => _mostrar(st.validarQr(st.tokenQr(1)))),
-          _opcion('Raúl Fernández', 'Recibo devuelto', Icons.receipt_long_outlined, Forja.rojo, Forja.rojoSuave,
-              () => _mostrar(st.validarQr(st.tokenQr(7)))),
-          _opcion('Marcos Herrero', 'Enseña una captura de hace un rato', Icons.screenshot_outlined, Forja.pajaTexto,
-              Forja.pajaSuave, () => _mostrar(st.validarQr(st.tokenQr(2, ventanaAnterior)))),
-        ]),
-      ),
-      const SizedBox(height: Esp.l),
-      Tarjeta(
-        padding: const EdgeInsets.all(20),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          const TituloBloque('Entrada manual',
-              apoyo: 'Si el socio no trae el móvil o se cae Internet. Se sincroniza al volver la conexión.'),
-          const SizedBox(height: Esp.m),
-          DropdownButtonFormField<int>(
-            value: manualId,
-            isExpanded: true,
-            decoration: const InputDecoration(labelText: 'Socio', prefixIcon: Icon(Icons.person_search_outlined)),
-            items: [
-              for (final s in st.socios) DropdownMenuItem(value: s.id, child: Text(s.nombre)),
-            ],
-            onChanged: (v) => setState(() => manualId = v ?? manualId),
-          ),
-          const SizedBox(height: Esp.m),
-          SizedBox(
-            width: double.infinity,
-            child: FilledButton.icon(
-              onPressed: () => _mostrar(st.entradaManual(manualId)),
-              icon: const Icon(Icons.how_to_reg_rounded, size: 20),
-              label: const Text('Registrar entrada'),
+          if (socios.isEmpty)
+            const Text('Todavía no hay socios registrados.', style: Txt.secundario)
+          else ...[
+            DropdownButtonFormField<int>(
+              value: manualId,
+              isExpanded: true,
+              decoration: const InputDecoration(labelText: 'Socio', prefixIcon: Icon(Icons.person_search_outlined)),
+              items: [
+                for (final s in socios) DropdownMenuItem(value: s['id'] as int, child: Text(s['nombre'] as String)),
+              ],
+              onChanged: (v) => setState(() => manualId = v),
             ),
-          ),
+            const SizedBox(height: Esp.m),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: () => _manual(),
+                icon: const Icon(Icons.how_to_reg_rounded, size: 20),
+                label: const Text('Registrar entrada'),
+              ),
+            ),
+          ],
         ]),
       ),
       const SizedBox(height: Esp.l),
       Tarjeta(
         padding: const EdgeInsets.fromLTRB(20, 20, 20, Esp.s),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          const TituloBloque('Últimos intentos'),
+          const TituloBloque('Últimos intentos de hoy'),
           const SizedBox(height: Esp.m),
+          if (intentos.isEmpty)
+            const Padding(
+              padding: EdgeInsets.only(bottom: Esp.m),
+              child: Text('Hoy todavía no ha pasado nadie.', style: Txt.secundario),
+            ),
           for (final a in intentos) _intento(a),
         ]),
       ),
@@ -545,45 +550,40 @@ class _PantallaAccesoState extends State<PantallaAcceso> with TickerProviderStat
     ]);
   }
 
-  /// En el móvil, las opciones de simulación salen en una hoja inferior.
-  Future<void> _hojaSimulador(BuildContext context) {
-    final anterior = st.ventanaActual() - 1;
-    void elegir(BuildContext hoja, Acceso Function() accion) {
-      Navigator.pop(hoja);
-      _mostrar(accion());
-    }
-
+  /// En el móvil, la entrada manual sale en una hoja inferior.
+  Future<void> _hojaManual(BuildContext context) {
     return showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
+      isScrollControlled: true,
       backgroundColor: Forja.superficie,
       builder: (hoja) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(Esp.l, 0, Esp.l, Esp.l),
-          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-            const TituloBloque('Simular un socio en la puerta'),
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(hoja).height * 0.7),
+          child: ListView(shrinkWrap: true, padding: const EdgeInsets.fromLTRB(Esp.l, 0, Esp.l, Esp.l), children: [
+            const TituloBloque('Entrada manual', apoyo: 'Toca al socio que está en la puerta.'),
             const SizedBox(height: Esp.m),
-            _opcion('Lucía Gómez', 'Cuota al día', Icons.check_circle_outline_rounded, Forja.verde, Forja.verdeSuave,
-                () => elegir(hoja, () => st.validarQr(st.tokenQr(1)))),
-            _opcion('Raúl Fernández', 'Recibo devuelto', Icons.receipt_long_outlined, Forja.rojo, Forja.rojoSuave,
-                () => elegir(hoja, () => st.validarQr(st.tokenQr(7)))),
-            _opcion('Marcos Herrero', 'Enseña una captura de hace un rato', Icons.screenshot_outlined, Forja.pajaTexto,
-                Forja.pajaSuave, () => elegir(hoja, () => st.validarQr(st.tokenQr(2, anterior)))),
-            _opcion(
-                'Entrada manual',
-                'Registrar a ${st.socio(manualId).nombre} desde recepción',
-                Icons.how_to_reg_rounded,
-                Forja.temple,
-                Forja.templeSuave,
-                () => elegir(hoja, () => st.entradaManual(manualId))),
+            if (socios.isEmpty) const Text('Todavía no hay socios registrados.', style: Txt.secundario),
+            for (final s in socios)
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: Avatar(s['nombre'] as String),
+                title: Text(s['nombre'] as String, style: Txt.cuerpoFuerte),
+                subtitle: Text(s['plan'] == null ? 'Sin plan' : 'Plan ${s['plan']}'),
+                trailing: const Icon(Icons.how_to_reg_rounded),
+                onTap: () {
+                  Navigator.pop(hoja);
+                  _manual(s['id'] as int);
+                },
+              ),
           ]),
         ),
       ),
     );
   }
 
-  Widget _intento(Acceso a) {
-    final e = estadoAcceso(a.resultado);
+  Widget _intento(Map<String, dynamic> a) {
+    final e = estadoAcceso(a['resultado'] as String);
     return Padding(
       padding: const EdgeInsets.only(bottom: Esp.m),
       child: Row(children: [
@@ -591,49 +591,12 @@ class _PantallaAccesoState extends State<PantallaAcceso> with TickerProviderStat
         const SizedBox(width: Esp.s),
         Expanded(
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(a.socio.nombre, style: Txt.cuerpoFuerte.copyWith(fontSize: 14)),
+            Text(a['nombre'] as String? ?? 'Pase desconocido', style: Txt.cuerpoFuerte.copyWith(fontSize: 14)),
             Text(e.texto, style: Txt.secundario.copyWith(fontSize: 12.5)),
           ]),
         ),
-        Text(horaSeg(a.momento), style: Txt.secundario.copyWith(fontFeatures: const [FontFeature.tabularFigures()])),
+        Text(horaDe(a['fecha']), style: Txt.secundario.copyWith(fontFeatures: const [FontFeature.tabularFigures()])),
       ]),
-    );
-  }
-
-  Widget _opcion(String titulo, String sub, IconData icono, Color color, Color fondo, VoidCallback alPulsar) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: Esp.s),
-      child: Material(
-        color: Forja.superficie,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(Rad.m),
-          side: const BorderSide(color: Forja.linea),
-        ),
-        clipBehavior: Clip.antiAlias,
-        child: InkWell(
-          onTap: alPulsar,
-          hoverColor: Forja.acero,
-          child: Padding(
-            padding: const EdgeInsets.all(Esp.m),
-            child: Row(children: [
-              Container(
-                width: 40,
-                height: 40,
-                decoration: BoxDecoration(color: fondo, borderRadius: BorderRadius.circular(Rad.m)),
-                child: Icon(icono, color: color, size: 22),
-              ),
-              const SizedBox(width: Esp.m),
-              Expanded(
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text(titulo, style: Txt.cuerpoFuerte),
-                  Text(sub, style: Txt.secundario),
-                ]),
-              ),
-              const Icon(Icons.qr_code_scanner_rounded, color: Forja.gris, size: 22),
-            ]),
-          ),
-        ),
-      ),
     );
   }
 }
