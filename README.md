@@ -10,7 +10,8 @@ La idea de negocio: sustituir el WhatsApp, el Excel, el PC de las tarjetas y la 
 
 | | Enlace |
 |---|---|
-| **Servidor del gimnasio** (Windows, primero esto) | [ForjaApp-Servidor-Setup.exe](https://github.com/martinezmendezalv-hue/forjaapp-demo/releases/download/demo/ForjaApp-Servidor-Setup.exe) · [portable](https://github.com/martinezmendezalv-hue/forjaapp-demo/releases/download/demo/ForjaApp-Servidor-portable.zip) |
+| **Servidor en internet** (ya funcionando) | **https://forjaapp-servidor.onrender.com** (web incluida) |
+| **Servidor en el PC del gimnasio** (opcional) | [ForjaApp-Servidor-Setup.exe](https://github.com/martinezmendezalv-hue/forjaapp-demo/releases/download/demo/ForjaApp-Servidor-Setup.exe) · [portable](https://github.com/martinezmendezalv-hue/forjaapp-demo/releases/download/demo/ForjaApp-Servidor-portable.zip) |
 | **En el navegador** (sin instalar nada) | **https://martinezmendezalv-hue.github.io/forjaapp-demo/** |
 | **Windows: instalador** | [ForjaApp-Demo-Setup.exe](https://github.com/martinezmendezalv-hue/forjaapp-demo/releases/download/demo/ForjaApp-Demo-Setup.exe) |
 | **Windows: portable** (sin instalar) | [ForjaApp-Demo-portable.zip](https://github.com/martinezmendezalv-hue/forjaapp-demo/releases/download/demo/ForjaApp-Demo-portable.zip) |
@@ -32,30 +33,33 @@ Para la versión portable: descomprime el zip y abre `forja_app_demo.exe`.
 > 2. Conecta el iPhone por cable, ábrelo en Sideloadly, arrastra `ForjaApp-Demo.ipa`, escribe tu Apple ID y pulsa **Start**.
 > 3. En el iPhone: **Ajustes → General → VPN y gestión de dispositivos** → confía en tu Apple ID. En iOS 16 o posterior activa también **Ajustes → Privacidad y seguridad → Modo de desarrollador** (reinicia el móvil).
 > 4. Con un Apple ID gratuito la firma dura **7 días**: repite el paso 2 (los datos de la app se conservan). Necesita iOS 15.5 o posterior.
-> En **iPhone** usa la versión web: funciona igual, cámara incluida.
 
-Las cuentas, los roles, los fichajes y los mensajes se guardan en **ForjaApp Servidor**, una app de Windows con su base de datos SQLite que corre en el PC del gimnasio. Las clases y reservas de la *App del socio* siguen siendo datos de ejemplo de **hoy**.
+Las cuentas, los roles, los fichajes y los mensajes se guardan en **ForjaApp Servidor**. Las clases y reservas de la *App del socio* siguen siendo datos de ejemplo de **hoy**.
 
 ## El servidor y las cuentas
 
+**En internet (lo normal):** el servidor está en **Render** (`https://forjaapp-servidor.onrender.com`) con la base de datos Postgres en **Neon** (base de datos `forjaapp`, con su propio usuario). Funciona desde cualquier red, con datos móviles o con otra wifi, y las apps de Windows, Android e iPhone y la web de GitHub Pages se conectan a él solas. Es el plan gratuito: si nadie lo usa en 15 minutos se duerme y la primera conexión tarda hasta un minuto (la app avisa con «Despertando el servidor…»). Se configura con `render.yaml` y el `Dockerfile`; `DATABASE_URL` y `ADMIN_CONTRASENA` están solo en Render. Render no se redespliega solo: tras cambiar el servidor, *Manual Deploy → Deploy latest commit*.
+
+**En el PC del gimnasio (opcional, sin internet):**
+
 1. Instala **ForjaApp-Servidor-Setup.exe** en el PC del gimnasio y ábrelo. La primera vez Windows pregunta por el cortafuegos: marca **redes privadas**. La ventana enseña la dirección (por ejemplo `http://192.168.1.40:8080`) y un QR para conectar el móvil. La base de datos queda en `%APPDATA%\ForjaApp Servidor\forja.db`.
 2. **Web:** abre esa dirección en cualquier navegador de la wifi; el servidor sirve la app web.
-3. **Windows, Android e iPhone:** en la pantalla de inicio de sesión toca **Servidor → Cambiar** y escribe la dirección (en el móvil también puedes **escanear el QR** de la ventana del servidor; el iPhone pedirá permiso para la red local). Si la app de Windows está en el mismo PC, ya apunta a `localhost:8080`.
+3. **Windows, Android e iPhone:** en la pantalla de inicio de sesión toca **Servidor → Cambiar** y escribe la dirección (en el móvil también puedes **escanear el QR** de la ventana del servidor; el iPhone pedirá permiso para la red local). Para volver al de internet: **Servidor → Usar el servidor de internet**.
 
 **Iniciar sesión no es lo mismo que registrarse**: quien no tiene cuenta no puede entrar. Las dos pantallas piden un **captcha de letras y números** y tienen el **ojo** para ver la contraseña; el registro pide repetirla y **aceptar las condiciones**.
 
 | Rol | Cómo se crea | Qué ve |
 |---|---|---|
-| **Gerencia** | Ya existe: `martinez.mendez.alv@gmail.com` | Todo. Es la única cuenta que **ve y modifica los fichajes**, abre cuentas de trabajadores y lee los mensajes de *Contacto*. |
+| **Gerencia** | Ya existe: `martinez.mendez.alv@gmail.com` (en internet, con la contraseña puesta en `ADMIN_CONTRASENA` de Render) | Todo. Es la única cuenta que **ve y modifica los fichajes**, abre cuentas de trabajadores y lee los mensajes de *Contacto*. |
 | **Trabajador** | Solo la abre gerencia en *Usuarios* | Recepción, punto de acceso, **solo sus fichajes y sin poder cambiarlos**, planes y contacto. |
 | **Socio** | Se registra él mismo | Al registrarse le **saltan los planes** (Comfort, Premium y Ultimate, como los de Basic-Fit). Ve su pase QR real, los planes para **suscribirse** y *Contacto*, que llega a gerencia. |
 
 El rol lo decide siempre el servidor: registrarse da rol de socio aunque alguien manipule la petición, y cada ruta de la API comprueba los permisos.
 
 > [!IMPORTANT]
-> La contraseña de gerencia es la que se pidió para la demo y es débil. Cámbiala en el menú de la cuenta → **Cambiar contraseña** antes de usarla con datos reales.
+> En el servidor del PC, la contraseña inicial de gerencia es la que se pidió para la demo y es débil. Cámbiala en el menú de la cuenta → **Cambiar contraseña** antes de usarla con datos reales.
 
-**Seguridad** (revisada con el plugin ECC): contraseñas con PBKDF2-SHA256 (600 000 iteraciones y sal), sesiones con token aleatorio guardado como hash y caducidad de 12 h, bloqueo tras 5 intentos fallidos por correo y equipo, captcha de un solo uso, límites por IP y un tope de trabajos pesados para que no tumben el PC. Además, consultas SQL parametrizadas y fichajes que la propia base de datos no deja modificar ni borrar (las correcciones son registros nuevos, una por fichaje). El pase QR va firmado con un secreto de cada socio y **solo abre una vez**. La API solo admite orígenes web conocidos (CORS) y envía cabeceras de seguridad con CSP; el CSV va protegido contra fórmulas. Va por HTTP dentro de la wifi del gimnasio: úsala en una red de confianza.
+**Seguridad** (revisada con el plugin ECC): contraseñas con PBKDF2-SHA256 con sal (600 000 iteraciones en el PC; 100 000 en el plan gratuito de Render, que tiene muy poca CPU), sesiones con token aleatorio guardado como hash y caducidad de 12 h, bloqueo tras 5 intentos fallidos por correo y equipo, captcha de un solo uso, límites por IP y un tope de trabajos pesados para que no tumben el PC. Además, consultas SQL parametrizadas y fichajes que la propia base de datos no deja modificar ni borrar (las correcciones son registros nuevos, una por fichaje). El pase QR va firmado con un secreto de cada socio y **solo abre una vez**. La API solo admite orígenes web conocidos (CORS) y envía cabeceras de seguridad con CSP; el CSV va protegido contra fórmulas. En internet va por HTTPS y la conexión con Neon va cifrada y comprobando el certificado; el servidor del PC va por HTTP dentro de la wifi del gimnasio, así que úsalo en una red de confianza.
 
 ## Cómo enseñarla al público
 
