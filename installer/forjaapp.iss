@@ -34,3 +34,5 @@ Name: "{autodesktop}\ForjaApp Demo"; Filename: "{app}\forja_app_demo.exe"; Tasks
 
 [Run]
 Filename: "{app}\forja_app_demo.exe"; Description: "Abrir ForjaApp Demo"; Flags: nowait postinstall skipifsilent
+; Al actualizarse sola (instalación silenciosa) la app se vuelve a abrir.
+Filename: "{app}\forja_app_demo.exe"; Flags: nowait; Check: WizardSilent
