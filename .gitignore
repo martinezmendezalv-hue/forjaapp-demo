@@ -7,7 +7,7 @@ build/
 *.iml
 .vscode/
 installer/Output/
-windows/
+/windows/
 entrega/
 
 # Firma de Android: nunca al repositorio

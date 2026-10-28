@@ -4,3 +4,8 @@ linter:
   rules:
     prefer_const_constructors: false
     prefer_const_literals_to_create_immutables: false
+
+analyzer:
+  exclude:
+    # El servidor es otro proyecto con sus dependencias y su propio análisis.
+    - servidor/**
