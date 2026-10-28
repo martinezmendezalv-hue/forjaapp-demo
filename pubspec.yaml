@@ -9,11 +9,14 @@ environment:
 dependencies:
   camera_platform_interface: ^2.9.0
   camera_windows: ^0.2.6
+  crypto: ^3.0.8
   flutter:
     sdk: flutter
+  http: ^1.6.0
   image: ^4.2.0
   mobile_scanner: ^6.0.0
   qr_flutter: ^4.1.0
+  shared_preferences: ^2.5.3
   zxing2: ^0.2.3
 
 dev_dependencies:

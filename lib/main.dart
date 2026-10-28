@@ -2,12 +2,22 @@ import 'package:flutter/material.dart';
 
 import 'data/store.dart';
 import 'screens/acceso.dart';
+import 'screens/contacto.dart';
+import 'screens/cuenta.dart';
 import 'screens/fichajes.dart';
+import 'screens/gerencia.dart';
+import 'screens/pase.dart';
+import 'screens/planes.dart';
 import 'screens/recepcion.dart';
 import 'screens/socio.dart';
+import 'servicios/api.dart';
+import 'servicios/sesion.dart' show sesion;
 import 'theme.dart';
+import 'widgets/carga.dart';
 
-void main() {
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await sesion.cargar();
   runApp(const ForjaApp());
 }
 
@@ -72,7 +82,7 @@ void avisar(ScaffoldMessengerState? m, String texto, {bool error = false}) {
     ));
 }
 
-/// Pantalla de carga breve al abrir la app.
+/// Pantalla de carga breve al abrir la app; después, inicio de sesión o la app.
 class Arranque extends StatefulWidget {
   const Arranque({super.key, required this.store});
   final ForjaStore store;
@@ -94,54 +104,87 @@ class _ArranqueState extends State<Arranque> {
 
   @override
   Widget build(BuildContext context) {
-    return AnimatedSwitcher(
-      duration: Mov.largo,
-      child: listo
-          ? Inicio(store: widget.store)
-          : const Scaffold(
-              backgroundColor: Forja.hierro,
-              body: Center(
-                child: Column(mainAxisSize: MainAxisSize.min, children: [
-                  Logo(tam: 88),
-                  SizedBox(height: Esp.xl),
-                  Text('FORJA TRAINING CLUB',
-                      style: TextStyle(
-                          fontFamily: Forja.display,
-                          fontSize: 22,
-                          fontWeight: FontWeight.w700,
-                          letterSpacing: 3,
-                          color: Colors.white)),
-                  SizedBox(height: Esp.l),
-                  SizedBox(
-                    width: 160,
-                    child: LinearProgressIndicator(
-                      minHeight: 3,
-                      color: Forja.ascua,
-                      backgroundColor: Forja.hierro3,
-                      semanticsLabel: 'Cargando los datos del club',
-                    ),
-                  ),
-                ]),
-              ),
-            ),
+    return ListenableBuilder(
+      listenable: sesion,
+      builder: (context, _) {
+        final u = sesion.usuario;
+        return AnimatedSwitcher(
+          duration: Mov.largo,
+          child: !listo
+              ? const _Bienvenida()
+              : u == null
+                  // Sin sesión no se ve nada de la app: primero hay que entrar.
+                  ? const PantallaCuenta(key: ValueKey('cuenta'))
+                  : Inicio(key: ValueKey('inicio-${u.id}'), store: widget.store),
+        );
+      },
     );
   }
 }
 
-class _Seccion {
-  const _Seccion(this.icono, this.iconoActivo, this.titulo, this.descripcion);
+class _Bienvenida extends StatelessWidget {
+  const _Bienvenida();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Scaffold(
+      backgroundColor: Forja.hierro,
+      body: Center(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Logo(tam: 88),
+          SizedBox(height: Esp.xl),
+          Text('FORJA TRAINING CLUB',
+              style: TextStyle(
+                  fontFamily: Forja.display,
+                  fontSize: 22,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 3,
+                  color: Colors.white)),
+          SizedBox(height: Esp.l),
+          SizedBox(
+            width: 160,
+            child: LinearProgressIndicator(
+              minHeight: 3,
+              color: Forja.ascua,
+              backgroundColor: Forja.hierro3,
+              semanticsLabel: 'Cargando los datos del club',
+            ),
+          ),
+        ]),
+      ),
+    );
+  }
+}
+
+/// Secciones de la app y qué roles las ven. Lo que se enseña aquí es solo
+/// comodidad: el servidor vuelve a comprobar el rol en cada petición.
+enum _Seccion {
+  pase('pase', Icons.qr_code_2_outlined, Icons.qr_code_2_rounded, 'Mi pase', 'QR de entrada', {'socio'}),
+  socio('socio', Icons.smartphone_outlined, Icons.smartphone_rounded, 'App del socio', 'Demo de reservas', {'admin'}),
+  recepcion('recepcion', Icons.space_dashboard_outlined, Icons.space_dashboard_rounded, 'Recepción',
+      'Ocupación y socios', {'admin', 'trabajador'}),
+  acceso('acceso', Icons.qr_code_scanner_outlined, Icons.qr_code_scanner_rounded, 'Punto de acceso', 'Tablet del torno',
+      {'admin', 'trabajador'}),
+  fichajes('fichajes', Icons.badge_outlined, Icons.badge_rounded, 'Fichajes', 'Registro de jornada',
+      {'admin', 'trabajador'}),
+  usuarios('usuarios', Icons.manage_accounts_outlined, Icons.manage_accounts_rounded, 'Usuarios',
+      'Cuentas y trabajadores', {'admin'}),
+  mensajes('mensajes', Icons.mail_outline_rounded, Icons.mail_rounded, 'Mensajes', 'Bandeja de contacto', {'admin'}),
+  planes('planes', Icons.workspace_premium_outlined, Icons.workspace_premium_rounded, 'Planes', 'Cuotas y suscripción',
+      {'admin', 'trabajador', 'socio'}),
+  contacto('contacto', Icons.support_agent_outlined, Icons.support_agent_rounded, 'Contacto', 'Escribe a gerencia',
+      {'trabajador', 'socio'});
+
+  const _Seccion(this.id, this.icono, this.iconoActivo, this.titulo, this.descripcion, this.roles);
+  final String id;
   final IconData icono;
   final IconData iconoActivo;
   final String titulo;
   final String descripcion;
-}
+  final Set<String> roles;
 
-const _secciones = [
-  _Seccion(Icons.smartphone_outlined, Icons.smartphone_rounded, 'App del socio', 'Reservas y pase de entrada'),
-  _Seccion(Icons.space_dashboard_outlined, Icons.space_dashboard_rounded, 'Recepción', 'Ocupación y socios'),
-  _Seccion(Icons.qr_code_scanner_outlined, Icons.qr_code_scanner_rounded, 'Punto de acceso', 'Tablet del torno'),
-  _Seccion(Icons.badge_outlined, Icons.badge_rounded, 'Fichajes', 'Registro de jornada'),
-];
+  String tituloPara(Usuario u) => this == fichajes && u.esTrabajador ? 'Mis fichajes' : titulo;
+}
 
 class Inicio extends StatefulWidget {
   const Inicio({super.key, required this.store});
@@ -152,19 +195,41 @@ class Inicio extends StatefulWidget {
 }
 
 class _InicioState extends State<Inicio> {
+  late final Usuario u = sesion.usuario!;
+  late final List<_Seccion> secciones = [
+    for (final s in _Seccion.values)
+      if (s.roles.contains(u.rol)) s
+  ];
+
   /// En la web se puede abrir una sección directamente: ?seccion=recepcion
-  int seccion = switch (Uri.base.queryParameters['seccion']) {
-    'recepcion' => 1,
-    'acceso' => 2,
-    'fichajes' => 3,
-    _ => 0,
-  };
+  late _Seccion seccion = secciones.firstWhere(
+    (s) => s.id == Uri.base.queryParameters['seccion'],
+    orElse: () => secciones.first,
+  );
+
+  @override
+  void initState() {
+    super.initState();
+    if (sesion.mostrarPlanes) {
+      sesion.mostrarPlanes = false;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) mostrarPlanesBienvenida(context);
+      });
+    }
+  }
+
+  void _ir(_Seccion s) => setState(() => seccion = s);
 
   Widget _pantalla() => switch (seccion) {
-        0 => PantallaSocio(store: widget.store),
-        1 => PantallaRecepcion(store: widget.store),
-        2 => PantallaAcceso(store: widget.store),
-        _ => PantallaFichajes(store: widget.store),
+        _Seccion.pase => PantallaPase(verPlanes: () => _ir(_Seccion.planes)),
+        _Seccion.socio => PantallaSocio(store: widget.store),
+        _Seccion.recepcion => PantallaRecepcion(store: widget.store, altas: u.esAdmin),
+        _Seccion.acceso => PantallaAcceso(store: widget.store),
+        _Seccion.fichajes => const PantallaFichajes(),
+        _Seccion.usuarios => const PantallaUsuarios(),
+        _Seccion.mensajes => const PantallaMensajes(),
+        _Seccion.planes => const PantallaPlanes(),
+        _Seccion.contacto => const PantallaContacto(),
       };
 
   @override
@@ -181,10 +246,10 @@ class _InicioState extends State<Inicio> {
             child: child,
           ),
         ),
-        child: KeyedSubtree(key: ValueKey(seccion), child: _pantalla()),
+        child: KeyedSubtree(key: ValueKey(seccion), child: SizedBox.expand(child: _pantalla())),
       );
       if (estrecho) {
-        // En pantallas estrechas (la web abierta en un móvil) el menú pasa a un cajón.
+        // En pantallas estrechas (el móvil) el menú pasa a un cajón.
         return Scaffold(
           appBar: AppBar(
             backgroundColor: Forja.hierro,
@@ -193,26 +258,20 @@ class _InicioState extends State<Inicio> {
             title: Row(children: [
               const Logo(tam: 30),
               const SizedBox(width: Esp.m),
-              Text(_secciones[seccion].titulo,
-                  style: const TextStyle(fontFamily: Forja.display, fontWeight: FontWeight.w700, fontSize: 22)),
+              Flexible(
+                child: Text(seccion.tituloPara(u),
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontFamily: Forja.display, fontWeight: FontWeight.w700, fontSize: 22)),
+              ),
             ]),
+            actions: [_MenuCuenta(u: u, claro: true), const SizedBox(width: Esp.xs)],
           ),
           drawer: Drawer(
             backgroundColor: Forja.hierro,
             child: SafeArea(child: _menu(cerrarAlElegir: true)),
           ),
           // SafeArea deja libre la barra de gestos de Android.
-          body: SafeArea(
-            top: false,
-            child: seccion == 0 || seccion == 2
-                ? contenido
-                : SingleChildScrollView(
-                    // Los paneles de escritorio necesitan unos 1000 px: aquí se
-                    // desplazan en horizontal en vez de romperse.
-                    scrollDirection: Axis.horizontal,
-                    child: SizedBox(width: 1000, child: contenido),
-                  ),
-          ),
+          body: SafeArea(top: false, child: contenido),
         );
       }
       return Scaffold(
@@ -221,31 +280,12 @@ class _InicioState extends State<Inicio> {
           Expanded(
             child: Column(children: [
               _barraSuperior(),
-              Expanded(child: LayoutBuilder(builder: (context, k) => _conMinimo(contenido, k))),
+              Expanded(child: contenido),
             ]),
           ),
         ]),
       );
     });
-  }
-
-  /// Los paneles de escritorio están pensados para 1080 × 640 como mínimo:
-  /// en ventanas más pequeñas se desplazan en lugar de recortarse.
-  Widget _conMinimo(Widget hijo, BoxConstraints k) {
-    const ancho = 1080.0, alto = 640.0;
-    if (seccion == 0 || (k.maxWidth >= ancho && k.maxHeight >= alto)) return hijo;
-    return Scrollbar(
-      child: SingleChildScrollView(
-        child: SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: SizedBox(
-            width: k.maxWidth < ancho ? ancho : k.maxWidth,
-            height: k.maxHeight < alto ? alto : k.maxHeight,
-            child: hijo,
-          ),
-        ),
-      ),
-    );
   }
 
   Widget _barraSuperior() {
@@ -278,17 +318,8 @@ class _InicioState extends State<Inicio> {
             ),
             const SizedBox(width: Esp.l),
             const SizedBox(height: 28, child: VerticalDivider()),
-            const SizedBox(width: Esp.l),
-            const Avatar('Ana Martín', tam: 32, fondo: Forja.templeSuave, color: Forja.temple),
             const SizedBox(width: Esp.s),
-            const Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('Ana Martín', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
-                Text('Recepción · turno de mañana', style: TextStyle(fontSize: 12, color: Forja.gris)),
-              ],
-            ),
+            _MenuCuenta(u: u),
           ]),
         );
       },
@@ -330,8 +361,12 @@ class _InicioState extends State<Inicio> {
               style: TextStyle(color: Forja.grisOscuro, fontSize: 12, fontWeight: FontWeight.w600, letterSpacing: 1.4)),
         ),
         const SizedBox(height: Esp.s),
-        for (var i = 0; i < _secciones.length; i++) _botonMenu(i, cerrarAlElegir),
-        const Spacer(),
+        Expanded(
+          child: ListView(padding: EdgeInsets.zero, children: [
+            for (final s in secciones) _botonMenu(s, cerrarAlElegir),
+          ]),
+        ),
+        const SizedBox(height: Esp.m),
         Container(
           padding: const EdgeInsets.all(Esp.m),
           decoration: BoxDecoration(
@@ -339,13 +374,13 @@ class _InicioState extends State<Inicio> {
             borderRadius: BorderRadius.circular(Rad.m),
             border: Border.all(color: Forja.hierro3),
           ),
-          child: const Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Icon(Icons.science_outlined, size: 18, color: Forja.paja),
-            SizedBox(width: Esp.s),
+          child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            const Icon(Icons.dns_outlined, size: 18, color: Forja.paja),
+            const SizedBox(width: Esp.s),
             Expanded(
               child: Text(
-                'Versión de demostración con datos de ejemplo. Nada sale de este equipo.',
-                style: TextStyle(color: Forja.grisClaro, fontSize: 12.5, height: 1.4),
+                'Conectado a ForjaApp Servidor\n${sesion.servidor}',
+                style: const TextStyle(color: Forja.grisClaro, fontSize: 12.5, height: 1.4),
               ),
             ),
           ]),
@@ -359,9 +394,8 @@ class _InicioState extends State<Inicio> {
     );
   }
 
-  Widget _botonMenu(int i, bool cerrarAlElegir) {
-    final s = _secciones[i];
-    final activo = i == seccion;
+  Widget _botonMenu(_Seccion s, bool cerrarAlElegir) {
+    final activo = s == seccion;
     return Padding(
       padding: const EdgeInsets.only(bottom: Esp.xs),
       child: Semantics(
@@ -375,7 +409,7 @@ class _InicioState extends State<Inicio> {
             hoverColor: Forja.hierro2,
             focusColor: Forja.hierro3,
             onTap: () {
-              setState(() => seccion = i);
+              _ir(s);
               if (cerrarAlElegir) Navigator.of(context).maybePop();
             },
             child: Padding(
@@ -395,7 +429,7 @@ class _InicioState extends State<Inicio> {
                 const SizedBox(width: Esp.m),
                 Expanded(
                   child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Text(s.titulo,
+                    Text(s.tituloPara(u),
                         style: TextStyle(
                           color: activo ? Colors.white : Forja.grisClaro,
                           fontWeight: activo ? FontWeight.w600 : FontWeight.w500,
@@ -411,4 +445,98 @@ class _InicioState extends State<Inicio> {
       ),
     );
   }
+}
+
+/// Usuario conectado con su menú: cambiar contraseña y cerrar sesión.
+class _MenuCuenta extends StatelessWidget {
+  const _MenuCuenta({required this.u, this.claro = false});
+  final Usuario u;
+  final bool claro;
+
+  @override
+  Widget build(BuildContext context) {
+    return PopupMenuButton<String>(
+      tooltip: 'Tu cuenta',
+      position: PopupMenuPosition.under,
+      onSelected: (v) async {
+        if (v == 'contrasena') await _cambiarContrasena(context);
+        if (v == 'salir') await sesion.salir();
+      },
+      itemBuilder: (_) => [
+        PopupMenuItem(enabled: false, child: Text(u.email, style: Txt.secundario)),
+        const PopupMenuDivider(),
+        const PopupMenuItem(
+          value: 'contrasena',
+          child: ListTile(leading: Icon(Icons.key_rounded), title: Text('Cambiar contraseña')),
+        ),
+        const PopupMenuItem(
+          value: 'salir',
+          child: ListTile(leading: Icon(Icons.logout_rounded), title: Text('Cerrar sesión')),
+        ),
+      ],
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: Esp.s, vertical: Esp.xs),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Avatar(u.nombre, tam: 32, fondo: Forja.templeSuave, color: Forja.temple),
+          if (!claro) ...[
+            const SizedBox(width: Esp.s),
+            Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(u.nombre, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+                Text(u.nombreRol, style: const TextStyle(fontSize: 12, color: Forja.gris)),
+              ],
+            ),
+          ],
+          Icon(Icons.expand_more_rounded, color: claro ? Colors.white : Forja.gris),
+        ]),
+      ),
+    );
+  }
+}
+
+Future<void> _cambiarContrasena(BuildContext context) {
+  final actual = TextEditingController();
+  final nueva = TextEditingController();
+  final nueva2 = TextEditingController();
+  return showDialog<void>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      title: const Text('Cambiar contraseña'),
+      content: SizedBox(
+        width: 420,
+        child: SingleChildScrollView(
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            CampoContrasena(controller: actual, etiqueta: 'Contraseña actual'),
+            const SizedBox(height: Esp.m),
+            CampoContrasena(
+              controller: nueva,
+              etiqueta: 'Contraseña nueva',
+              ayuda: 'Mínimo 8 caracteres, con letras y números.',
+            ),
+            const SizedBox(height: Esp.m),
+            CampoContrasena(controller: nueva2, etiqueta: 'Repite la contraseña nueva'),
+            const SizedBox(height: Esp.m),
+            const Nota('Se cerrará la sesión en tus otros dispositivos.'),
+          ]),
+        ),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancelar')),
+        FilledButton(
+          onPressed: () async {
+            final ok = await intentar(ctx, () => sesion.api.cambiarContrasena(actual.text, nueva.text, nueva2.text),
+                exito: 'Contraseña cambiada.');
+            if (ok && ctx.mounted) Navigator.pop(ctx);
+          },
+          child: const Text('Guardar'),
+        ),
+      ],
+    ),
+  ).whenComplete(() {
+    actual.dispose();
+    nueva.dispose();
+    nueva2.dispose();
+  });
 }

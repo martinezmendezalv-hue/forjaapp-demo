@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../data/store.dart';
+import '../servicios/api.dart' show ErrorServidor;
+import '../servicios/sesion.dart' show sesion;
 import '../theme.dart';
 import '../widgets/escaner.dart';
 import 'recepcion.dart' show estadoAcceso;
@@ -81,6 +83,10 @@ class _PantallaAccesoState extends State<PantallaAcceso> with TickerProviderStat
   /// Llega un texto leído por la cámara.
   void _leido(String token) {
     if (ultimo != null) return; // se está enseñando un resultado
+    if (token.startsWith('FORJA2-')) {
+      _leidoServidor(token);
+      return;
+    }
     final edad = st.antiguedadQr(token);
     if (edad == null) {
       if (pista == null) _avisar('Ese QR no es un pase de ForjaApp');
@@ -99,6 +105,38 @@ class _PantallaAccesoState extends State<PantallaAcceso> with TickerProviderStat
     _ultimoSocio = socio;
     _horaUltimo = DateTime.now();
     _mostrar(st.validarQr(token));
+  }
+
+  bool _validando = false;
+
+  /// Pase de un socio con cuenta: lo comprueba ForjaApp Servidor.
+  Future<void> _leidoServidor(String token) async {
+    if (_validando) return;
+    final uid = int.tryParse(token.split('-').elementAtOrNull(1) ?? '');
+    if (uid == _ultimoSocio && DateTime.now().difference(_horaUltimo) < const Duration(seconds: 8)) return;
+    _validando = true;
+    try {
+      final r = await sesion.api.validarAcceso(token);
+      if (!mounted) return;
+      final resultado = switch (r['resultado']) {
+        'concedido' => ResultadoAcceso.concedido,
+        'cuotaPendiente' => ResultadoAcceso.cuotaPendiente,
+        'qrCaducado' => ResultadoAcceso.qrCaducado,
+        _ => null,
+      };
+      final socio = r['socio'];
+      if (resultado == null || socio is! Map) {
+        _avisar('Ese QR no es un pase de ForjaApp');
+        return;
+      }
+      _ultimoSocio = uid;
+      _horaUltimo = DateTime.now();
+      _mostrar(st.accesoDelServidor(id: socio['id'] as int, nombre: socio['nombre'] as String, resultado: resultado));
+    } on ErrorServidor catch (e) {
+      if (mounted) _avisar(e.mensaje);
+    } finally {
+      _validando = false;
+    }
   }
 
   @override

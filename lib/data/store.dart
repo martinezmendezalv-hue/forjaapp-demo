@@ -309,6 +309,15 @@ class ForjaStore extends ChangeNotifier {
     return acc;
   }
 
+  /// Acceso validado por ForjaApp Servidor (pase FORJA2 de un socio real).
+  Acceso accesoDelServidor({required int id, required String nombre, required ResultadoAcceso resultado}) {
+    final so = Socio(id: 100000 + id, nombre: nombre, tarifa: Tarifa.completa, diasSinVenir: 0);
+    final acc = Acceso(so, DateTime.now(), resultado);
+    accesos.insert(0, acc);
+    notifyListeners();
+    return acc;
+  }
+
   Acceso entradaManual(int socioId) {
     final so = socio(socioId);
     so.diasSinVenir = 0;
@@ -356,7 +365,7 @@ class ForjaStore extends ChangeNotifier {
     for (final f in fichajes) {
       final m = f.momento;
       b.writeln('${f.empleado.nombre};${f.empleado.puesto};${f.tipo.nombre};'
-          '${m.year}-${_2(m.month)}-${_2(m.day)} ${_2(m.hour)}:${_2(m.minute)};${f.correccion ?? ''}');
+          '${m.year}-${_dos(m.month)}-${_dos(m.day)} ${_dos(m.hour)}:${_dos(m.minute)};${f.correccion ?? ''}');
     }
     return b.toString();
   }
@@ -393,6 +402,6 @@ class ForjaStore extends ChangeNotifier {
     ultimoMensaje.value = m;
   }
 
-  static String _2(int n) => n.toString().padLeft(2, '0');
-  static String _h(DateTime t) => '${_2(t.hour)}:${_2(t.minute)}';
+  static String _dos(int n) => n.toString().padLeft(2, '0');
+  static String _h(DateTime t) => '${_dos(t.hour)}:${_dos(t.minute)}';
 }

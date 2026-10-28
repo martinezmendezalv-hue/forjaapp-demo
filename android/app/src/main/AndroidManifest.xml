@@ -1,9 +1,13 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <!-- El punto de acceso lee el QR del socio con la cámara. -->
     <uses-permission android:name="android.permission.CAMERA"/>
+    <!-- La app habla con ForjaApp Servidor por la wifi del gimnasio (HTTP en la red local). -->
+    <uses-permission android:name="android.permission.INTERNET"/>
     <uses-feature android:name="android.hardware.camera" android:required="false"/>
     <application
         android:label="ForjaApp"
+        android:usesCleartextTraffic="true"
+        android:allowBackup="false"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity

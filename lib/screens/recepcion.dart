@@ -4,69 +4,85 @@ import '../data/store.dart';
 import '../theme.dart';
 
 class PantallaRecepcion extends StatelessWidget {
-  const PantallaRecepcion({super.key, required this.store});
+  const PantallaRecepcion({super.key, required this.store, this.altas = true});
   final ForjaStore store;
+
+  /// Solo gerencia da de alta socios.
+  final bool altas;
 
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
       listenable: store,
-      builder: (context, _) {
+      builder: (context, _) => LayoutBuilder(builder: (context, c) {
         final llenas = store.sesiones.where((s) => s.llena).length;
+        final indicadores = [
+          Indicador(
+            valor: '${store.socios.length}',
+            texto: 'Socios activos',
+            icono: Icons.groups_2_outlined,
+            detalle: '${store.inactivos.length} en riesgo de baja',
+          ),
+          Indicador(
+            valor: '${store.entradasHoy}',
+            texto: 'Entradas hoy',
+            icono: Icons.login_rounded,
+            color: Forja.verde,
+            detalle: 'Por QR y manuales',
+          ),
+          Indicador(
+            valor: '${(store.ocupacionMedia * 100).round()} %',
+            texto: 'Ocupación de clases',
+            icono: Icons.local_fire_department_outlined,
+            color: Forja.ascuaTexto,
+            detalle: '$llenas de ${store.sesiones.length} clases completas',
+          ),
+          Indicador(
+            valor: '${store.enEspera}',
+            texto: 'En lista de espera',
+            icono: Icons.hourglass_top_rounded,
+            color: Forja.pajaTexto,
+            detalle: 'Suben solos si alguien cancela',
+          ),
+        ];
+        final alta = FilledButton.icon(
+          onPressed: () => _alta(context),
+          icon: const Icon(Icons.person_add_alt_1_rounded, size: 20),
+          label: const Text('Alta de socio'),
+        );
+        if (c.maxWidth < 1000 || c.maxHeight < 600) {
+          // Móvil o ventana pequeña: todo en una columna que se desplaza.
+          final w = c.maxWidth < 560 ? c.maxWidth - Esp.l * 2 : (c.maxWidth - Esp.l * 3) / 2;
+          return ListView(padding: const EdgeInsets.all(Esp.l), children: [
+            if (altas) ...[
+              SizedBox(width: double.infinity, child: alta),
+              const SizedBox(height: Esp.l),
+            ],
+            Wrap(spacing: Esp.l, runSpacing: Esp.l, children: [
+              for (final i in indicadores) SizedBox(width: w, child: i),
+            ]),
+            const SizedBox(height: Esp.l),
+            _clases(compacto: true),
+            const SizedBox(height: Esp.l),
+            _inactivos(compacto: true),
+            const SizedBox(height: Esp.l),
+            _entradas(compacto: true),
+          ]);
+        }
         return Padding(
           padding: const EdgeInsets.fromLTRB(Esp.xxl, Esp.xl, Esp.xxl, Esp.xl),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             CabeceraPanel(
               antetitulo: 'Recepción · panel de gerencia',
               titulo: 'Cómo va el club hoy',
-              acciones: [
-                FilledButton.icon(
-                  onPressed: () => _alta(context),
-                  icon: const Icon(Icons.person_add_alt_1_rounded, size: 20),
-                  label: const Text('Alta de socio'),
-                ),
-              ],
+              acciones: [if (altas) alta],
             ),
             const SizedBox(height: Esp.xl),
             Row(children: [
-              Expanded(
-                child: Indicador(
-                  valor: '${store.socios.length}',
-                  texto: 'Socios activos',
-                  icono: Icons.groups_2_outlined,
-                  detalle: '${store.inactivos.length} en riesgo de baja',
-                ),
-              ),
-              const SizedBox(width: Esp.l),
-              Expanded(
-                child: Indicador(
-                  valor: '${store.entradasHoy}',
-                  texto: 'Entradas hoy',
-                  icono: Icons.login_rounded,
-                  color: Forja.verde,
-                  detalle: 'Por QR y manuales',
-                ),
-              ),
-              const SizedBox(width: Esp.l),
-              Expanded(
-                child: Indicador(
-                  valor: '${(store.ocupacionMedia * 100).round()} %',
-                  texto: 'Ocupación de clases',
-                  icono: Icons.local_fire_department_outlined,
-                  color: Forja.ascuaTexto,
-                  detalle: '$llenas de ${store.sesiones.length} clases completas',
-                ),
-              ),
-              const SizedBox(width: Esp.l),
-              Expanded(
-                child: Indicador(
-                  valor: '${store.enEspera}',
-                  texto: 'En lista de espera',
-                  icono: Icons.hourglass_top_rounded,
-                  color: Forja.pajaTexto,
-                  detalle: 'Suben solos si alguien cancela',
-                ),
-              ),
+              for (final (n, i) in indicadores.indexed) ...[
+                if (n > 0) const SizedBox(width: Esp.l),
+                Expanded(child: i),
+              ],
             ]),
             const SizedBox(height: Esp.l),
             Expanded(
@@ -85,36 +101,50 @@ class PantallaRecepcion extends StatelessWidget {
             ),
           ]),
         );
-      },
+      }),
+    );
+  }
+
+  /// Lista con separadores: dentro de la tarjeta en escritorio, o entera en el móvil.
+  Widget _lista({required bool compacto, required int n, required Widget Function(int) item, required Widget vacio}) {
+    if (n == 0) return compacto ? vacio : Expanded(child: Center(child: vacio));
+    if (compacto) {
+      return Column(children: [
+        for (var i = 0; i < n; i++) ...[if (i > 0) const Divider(), item(i)],
+      ]);
+    }
+    return Expanded(
+      child: ListView.separated(
+          itemCount: n, separatorBuilder: (_, __) => const Divider(), itemBuilder: (_, i) => item(i)),
     );
   }
 
   // ------------------------------------------------------------ clases
 
-  Widget _clases() {
+  Widget _clases({bool compacto = false}) {
     return Tarjeta(
-      padding: const EdgeInsets.fromLTRB(Esp.xl, 20, Esp.xl, Esp.l),
+      padding: EdgeInsets.fromLTRB(compacto ? Esp.l : Esp.xl, 20, compacto ? Esp.l : Esp.xl, Esp.l),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         const TituloBloque('Clases de hoy', apoyo: 'Se actualiza en cuanto un socio reserva o cancela desde la app.'),
         const SizedBox(height: Esp.l),
-        const CabeceraTabla(columnas: [
-          (70, 'HORA'),
-          (null, 'CLASE'),
-          (180, 'OCUPACIÓN'),
-          (150, 'ESTADO'),
-        ]),
-        Expanded(
-          child: ListView.separated(
-            itemCount: store.sesiones.length,
-            separatorBuilder: (_, __) => const Divider(),
-            itemBuilder: (_, i) => _filaClase(store.sesiones[i]),
-          ),
+        if (!compacto)
+          const CabeceraTabla(columnas: [
+            (70, 'HORA'),
+            (null, 'CLASE'),
+            (180, 'OCUPACIÓN'),
+            (150, 'ESTADO'),
+          ]),
+        _lista(
+          compacto: compacto,
+          n: store.sesiones.length,
+          item: (i) => _filaClase(store.sesiones[i], compacto: compacto),
+          vacio: const SizedBox.shrink(),
         ),
       ]),
     );
   }
 
-  Widget _filaClase(Sesion s) {
+  Widget _filaClase(Sesion s, {bool compacto = false}) {
     final ahora = DateTime.now();
     final fin = s.inicio.add(Duration(minutes: s.minutos));
     final Estado estado;
@@ -130,6 +160,27 @@ class PantallaRecepcion extends StatelessWidget {
     } else {
       estado = Estado.libre;
       texto = '${s.libres} libres';
+    }
+    if (compacto) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: Esp.s),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            Text(hora(s.inicio), style: Txt.hora),
+            const SizedBox(width: Esp.m),
+            Expanded(child: Text(s.actividad, style: Txt.cuerpoFuerte, overflow: TextOverflow.ellipsis)),
+            Insignia(estado, texto: texto),
+          ]),
+          Text('${s.sala} · ${s.instructor} · ${s.minutos} min', style: Txt.secundario),
+          const SizedBox(height: Esp.s),
+          Row(children: [
+            Expanded(child: BarraTemple(s.ocupacion, alto: 7)),
+            const SizedBox(width: Esp.m),
+            Text('${s.reservas.length}/${s.aforo}${s.espera.isEmpty ? '' : ' · +${s.espera.length} en espera'}',
+                style: Txt.secundario.copyWith(color: s.llena ? Forja.rojo : Forja.gris)),
+          ]),
+        ]),
+      );
     }
     return FilaTabla(
       child: Row(children: [
@@ -166,7 +217,7 @@ class PantallaRecepcion extends StatelessWidget {
 
   // --------------------------------------------------------- inactivos
 
-  Widget _inactivos() {
+  Widget _inactivos({bool compacto = false}) {
     final lista = store.inactivos;
     return Tarjeta(
       padding: const EdgeInsets.fromLTRB(20, 20, 20, Esp.m),
@@ -177,52 +228,46 @@ class PantallaRecepcion extends StatelessWidget {
           accion: Insignia(Estado('${lista.length}', Icons.trending_down_rounded, Forja.ascuaTexto, Forja.ascuaSuave)),
         ),
         const SizedBox(height: Esp.s),
-        Expanded(
-          child: lista.isEmpty
-              ? const Center(
-                  child: EstadoVacio(
-                    icono: Icons.sentiment_satisfied_alt_rounded,
-                    titulo: 'Todos vienen a entrenar',
-                    texto: 'Nadie lleva más de tres semanas sin venir.',
-                  ),
-                )
-              : ListView.separated(
-                  itemCount: lista.length,
-                  separatorBuilder: (_, __) => const Divider(),
-                  itemBuilder: (_, i) {
-                    final s = lista[i];
-                    final enviado = store.avisos.any((a) => a.socioId == s.id && a.texto.startsWith('Te echamos'));
-                    return Padding(
-                      padding: const EdgeInsets.symmetric(vertical: Esp.s),
-                      child: Row(children: [
-                        Avatar(s.nombre, tam: 36),
-                        const SizedBox(width: Esp.m),
-                        Expanded(
-                          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                            Text(s.nombre, style: Txt.cuerpoFuerte),
-                            Text('${s.diasSinVenir} días sin venir · ${s.tarifa.nombre}', style: Txt.secundario),
-                          ]),
-                        ),
-                        AnimatedSwitcher(
-                          duration: Mov.medio,
-                          child: enviado
-                              ? const Insignia(
-                                  Estado(
-                                      'Aviso enviado', Icons.mark_email_read_outlined, Forja.verde, Forja.verdeSuave),
-                                  key: ValueKey('enviado'),
-                                )
-                              : OutlinedButton.icon(
-                                  key: const ValueKey('enviar'),
-                                  onPressed: () => store.avisarInactivo(s),
-                                  style: OutlinedButton.styleFrom(minimumSize: const Size(0, 38)),
-                                  icon: const Icon(Icons.send_rounded, size: 16),
-                                  label: const Text('Enviar aviso'),
-                                ),
-                        ),
-                      ]),
-                    );
-                  },
+        _lista(
+          compacto: compacto,
+          n: lista.length,
+          vacio: const EstadoVacio(
+            icono: Icons.sentiment_satisfied_alt_rounded,
+            titulo: 'Todos vienen a entrenar',
+            texto: 'Nadie lleva más de tres semanas sin venir.',
+          ),
+          item: (i) {
+            final s = lista[i];
+            final enviado = store.avisos.any((a) => a.socioId == s.id && a.texto.startsWith('Te echamos'));
+            return Padding(
+              padding: const EdgeInsets.symmetric(vertical: Esp.s),
+              child: Row(children: [
+                Avatar(s.nombre, tam: 36),
+                const SizedBox(width: Esp.m),
+                Expanded(
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Text(s.nombre, style: Txt.cuerpoFuerte, overflow: TextOverflow.ellipsis),
+                    Text('${s.diasSinVenir} días sin venir · ${s.tarifa.nombre}', style: Txt.secundario),
+                  ]),
                 ),
+                AnimatedSwitcher(
+                  duration: Mov.medio,
+                  child: enviado
+                      ? const Insignia(
+                          Estado('Aviso enviado', Icons.mark_email_read_outlined, Forja.verde, Forja.verdeSuave),
+                          key: ValueKey('enviado'),
+                        )
+                      : OutlinedButton.icon(
+                          key: const ValueKey('enviar'),
+                          onPressed: () => store.avisarInactivo(s),
+                          style: OutlinedButton.styleFrom(minimumSize: const Size(0, 38)),
+                          icon: const Icon(Icons.send_rounded, size: 16),
+                          label: const Text('Enviar aviso'),
+                        ),
+                ),
+              ]),
+            );
+          },
         ),
       ]),
     );
@@ -230,50 +275,45 @@ class PantallaRecepcion extends StatelessWidget {
 
   // ---------------------------------------------------------- entradas
 
-  Widget _entradas() {
+  Widget _entradas({bool compacto = false}) {
     final lista = ([...store.accesos]..sort((a, b) => b.momento.compareTo(a.momento))).take(20).toList();
     return Tarjeta(
       padding: const EdgeInsets.fromLTRB(20, 20, 20, Esp.m),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         const TituloBloque('Últimas entradas', apoyo: 'Lo que registra el torno, en tiempo real.'),
         const SizedBox(height: Esp.s),
-        Expanded(
-          child: lista.isEmpty
-              ? const Center(
-                  child: EstadoVacio(
-                    icono: Icons.door_front_door_outlined,
-                    titulo: 'Aún no ha entrado nadie',
-                    texto: 'Las entradas aparecerán aquí al pasar por el torno.',
-                  ),
-                )
-              : ListView.separated(
-                  itemCount: lista.length,
-                  separatorBuilder: (_, __) => const Divider(),
-                  itemBuilder: (_, i) {
-                    final a = lista[i];
-                    final e = estadoAcceso(a.resultado);
-                    return Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 7),
-                      child: Row(children: [
-                        Container(
-                          width: 32,
-                          height: 32,
-                          decoration: BoxDecoration(color: e.fondo, borderRadius: BorderRadius.circular(Rad.s)),
-                          child: Icon(e.icono, size: 18, color: e.color),
-                        ),
-                        const SizedBox(width: Esp.m),
-                        Expanded(
-                          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                            Text(a.socio.nombre, style: Txt.cuerpoFuerte.copyWith(fontSize: 14)),
-                            Text(e.texto,
-                                style: Txt.secundario.copyWith(fontSize: 12.5, color: a.dentro ? Forja.gris : e.color)),
-                          ]),
-                        ),
-                        Text(hora(a.momento), style: Txt.hora.copyWith(fontSize: 15)),
-                      ]),
-                    );
-                  },
+        _lista(
+          compacto: compacto,
+          n: lista.length,
+          vacio: const EstadoVacio(
+            icono: Icons.door_front_door_outlined,
+            titulo: 'Aún no ha entrado nadie',
+            texto: 'Las entradas aparecerán aquí al pasar por el torno.',
+          ),
+          item: (i) {
+            final a = lista[i];
+            final e = estadoAcceso(a.resultado);
+            return Padding(
+              padding: const EdgeInsets.symmetric(vertical: 7),
+              child: Row(children: [
+                Container(
+                  width: 32,
+                  height: 32,
+                  decoration: BoxDecoration(color: e.fondo, borderRadius: BorderRadius.circular(Rad.s)),
+                  child: Icon(e.icono, size: 18, color: e.color),
                 ),
+                const SizedBox(width: Esp.m),
+                Expanded(
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Text(a.socio.nombre, style: Txt.cuerpoFuerte.copyWith(fontSize: 14)),
+                    Text(e.texto,
+                        style: Txt.secundario.copyWith(fontSize: 12.5, color: a.dentro ? Forja.gris : e.color)),
+                  ]),
+                ),
+                Text(hora(a.momento), style: Txt.hora.copyWith(fontSize: 15)),
+              ]),
+            );
+          },
         ),
       ]),
     );

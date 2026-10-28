@@ -1,14 +1,13 @@
-name: Compilar demo (Windows, Android y web)
+name: Compilar demo (Windows, Android, web y servidor)
 
 on:
   push:
     branches: [main]
   workflow_dispatch:
 
+# Por defecto, solo lectura. Cada trabajo que publica pide lo justo.
 permissions:
-  contents: write
-  pages: write
-  id-token: write
+  contents: read
 
 concurrency:
   group: demo
@@ -72,6 +71,74 @@ jobs:
             ForjaApp-Demo-Setup.exe
             ForjaApp-Demo-portable.zip
 
+  servidor-pruebas:
+    # Las pruebas del servidor usan la SQLite del sistema, que Ubuntu ya trae.
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: servidor
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.27.4
+          channel: stable
+          cache: true
+
+      - run: sudo apt-get install -y libsqlite3-dev
+
+      - run: flutter pub get
+
+      - name: Revisar el código
+        run: flutter analyze --no-fatal-infos --no-fatal-warnings
+
+      - name: Pruebas de la API (login, roles, captcha, fichajes...)
+        run: flutter test
+
+  servidor:
+    needs: servidor-pruebas
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.27.4
+          channel: stable
+          cache: true
+
+      - name: Compilar la versión web que sirve el servidor
+        run: |
+          flutter pub get
+          flutter build web --release --base-href /
+
+      - name: Compilar ForjaApp Servidor
+        working-directory: servidor
+        run: |
+          flutter pub get
+          flutter build windows --release
+
+      - name: Meter la web junto al servidor
+        shell: pwsh
+        run: Copy-Item build\web servidor\build\windows\x64\runner\Release\web -Recurse
+
+      - name: Crear el instalador y la versión portable
+        shell: pwsh
+        run: |
+          choco install innosetup -y --no-progress
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" installer\servidor.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Copy-Item installer\Output\ForjaApp-Servidor-Setup.exe .
+          Compress-Archive -Path servidor\build\windows\x64\runner\Release\* -DestinationPath ForjaApp-Servidor-portable.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: servidor
+          path: |
+            ForjaApp-Servidor-Setup.exe
+            ForjaApp-Servidor-portable.zip
+
   android:
     runs-on: ubuntu-latest
     steps:
@@ -121,8 +188,10 @@ jobs:
           path: ForjaApp-Demo.apk
 
   publicar:
-    needs: [windows, android]
+    needs: [windows, android, servidor]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/download-artifact@v4
         with:
@@ -134,10 +203,13 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           gh release delete demo --yes --cleanup-tag || true
-          gh release create demo ForjaApp-Demo-Setup.exe ForjaApp-Demo-portable.zip ForjaApp-Demo.apk \
+          gh release create demo ForjaApp-Servidor-Setup.exe ForjaApp-Servidor-portable.zip \
+            ForjaApp-Demo-Setup.exe ForjaApp-Demo-portable.zip ForjaApp-Demo.apk \
             --target "$GITHUB_SHA" \
-            --title "ForjaApp - demo para Windows y Android" \
-            --notes "**Windows:** ForjaApp-Demo-Setup.exe (instalador) o ForjaApp-Demo-portable.zip (sin instalar: descomprime y abre forja_app_demo.exe). SmartScreen avisará porque no está firmado: Más información → Ejecutar de todas formas.
+            --title "ForjaApp - servidor, Windows, Android y web" \
+            --notes "**Primero, el servidor:** instala ForjaApp-Servidor-Setup.exe en el PC del gimnasio y déjalo abierto. Guarda la base de datos (usuarios, roles, fichajes y mensajes) y sirve la versión web en http://IP-del-PC:8080. La primera vez Windows pregunta por el cortafuegos: permite las redes privadas.
+
+          **Windows:** ForjaApp-Demo-Setup.exe (instalador) o ForjaApp-Demo-portable.zip (sin instalar: descomprime y abre forja_app_demo.exe). SmartScreen avisará porque no está firmado: Más información → Ejecutar de todas formas.
 
           **Android:** ForjaApp-Demo.apk. Ábrelo en el móvil y permite instalar apps de origen desconocido. No necesita Google Play ni cuenta de pago.
 
@@ -147,6 +219,10 @@ jobs:
 
   web:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
     environment:
       name: github-pages
       url: ${{ steps.despliegue.outputs.page_url }}

@@ -7,6 +7,10 @@ build/
 *.iml
 .vscode/
 installer/Output/
-pubspec.lock
 windows/
 entrega/
+
+# Firma de Android: nunca al repositorio
+*.jks
+*.keystore
+key.properties
