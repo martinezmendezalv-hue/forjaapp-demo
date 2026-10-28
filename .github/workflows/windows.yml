@@ -77,6 +77,16 @@ jobs:
     defaults:
       run:
         working-directory: servidor
+    # Postgres de usar y tirar para probar también la base de datos de la nube.
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: forja
+          POSTGRES_PASSWORD: solo-para-pruebas
+          POSTGRES_DB: pruebas
+        ports: ['5432:5432']
+        options: --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
     steps:
       - uses: actions/checkout@v4
 
@@ -93,8 +103,13 @@ jobs:
       - name: Revisar el código
         run: flutter analyze --no-fatal-infos --no-fatal-warnings
 
-      - name: Pruebas de la API (login, roles, captcha, fichajes...)
+      - name: Pruebas de la API (login, roles, captcha, fichajes...) con SQLite
         run: flutter test
+
+      - name: Las mismas pruebas con Postgres (base de datos de la nube)
+        env:
+          FORJA_PG_PRUEBAS: postgres://forja:solo-para-pruebas@localhost:5432/pruebas
+        run: flutter test --concurrency=1
 
   servidor:
     needs: servidor-pruebas

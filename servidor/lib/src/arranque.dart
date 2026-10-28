@@ -18,20 +18,30 @@ class ServidorForja {
 
   Future<void> parar() async {
     await http.close(force: true);
-    bd.cerrar();
+    await bd.cerrar();
   }
 
   /// Arranca la API (y la web de ForjaApp si existe [carpetaWeb]) en todas
   /// las interfaces de red del PC, para que entren los móviles del wifi.
+  /// Con [urlPostgres] usa esa base de datos (la de la nube) en vez del
+  /// archivo SQLite [rutaBd].
   static Future<ServidorForja> arrancar({
-    required String rutaBd,
+    String? rutaBd,
+    String? urlPostgres,
+    String contrasenaAdmin = contrasenaInicialAdmin,
+    bool trasProxy = false,
     int puerto = 8080,
     String? carpetaWeb,
     void Function(String linea)? alRegistrar,
   }) async {
-    Directory(p.dirname(rutaBd)).createSync(recursive: true);
-    final bd = await BaseDatos.abrir(rutaBd);
-    final api = ForjaApi(bd, alRegistrar: alRegistrar);
+    final BaseDatos bd;
+    if (urlPostgres != null) {
+      bd = await BaseDatos.conectar(urlPostgres, contrasenaAdmin: contrasenaAdmin);
+    } else {
+      Directory(p.dirname(rutaBd!)).createSync(recursive: true);
+      bd = await BaseDatos.abrir(rutaBd, contrasenaAdmin: contrasenaAdmin);
+    }
+    final api = ForjaApi(bd, alRegistrar: alRegistrar, trasProxy: trasProxy);
 
     // /api/* va siempre a la API (sus 404 en JSON no se pierden); el resto, a la web.
     final apiHandler = api.handler;

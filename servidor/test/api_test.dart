@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:forja_servidor/src/api.dart';
@@ -65,7 +66,17 @@ Future<void> crearTrabajador(String admin, String email, {String nombre = 'Ana M
 void main() {
   setUp(() async {
     iteracionesPbkdf2 = 1000;
-    bd = await BaseDatos.abrir(null);
+    // Con FORJA_PG_PRUEBAS=postgres://… las mismas pruebas van contra
+    // Postgres (se vacía la base de datos antes de cada una).
+    final pgUrl = Platform.environment['FORJA_PG_PRUEBAS'];
+    if (pgUrl == null) {
+      bd = await BaseDatos.abrir(null);
+    } else {
+      final limpia = await BaseDatos.conectar(pgUrl);
+      await limpia.ejecutar('DROP TABLE IF EXISTS accesos, mensajes, fichajes, sesiones, usuarios CASCADE');
+      await limpia.cerrar();
+      bd = await BaseDatos.conectar(pgUrl);
+    }
     api = ForjaApi(bd);
   });
   tearDown(() => bd.cerrar());
@@ -162,8 +173,8 @@ void main() {
     final admin = await entrar(correoAdmin, 'alvaro');
     await crearTrabajador(admin, 'ana@forja.es');
     await crearTrabajador(admin, 'hugo@forja.es', nombre: 'Hugo Prieto');
-    final ana = bd.usuarioPorCorreo('ana@forja.es')!['id'] as int;
-    final hugo = bd.usuarioPorCorreo('hugo@forja.es')!['id'] as int;
+    final ana = (await bd.usuarioPorCorreo('ana@forja.es'))!['id'] as int;
+    final hugo = (await bd.usuarioPorCorreo('hugo@forja.es'))!['id'] as int;
     expect((await pedir('POST', '/api/fichajes', cuerpo: {'usuarioId': ana, 'tipo': 'entrada'}, token: admin)).estado, 201);
     expect((await pedir('POST', '/api/fichajes', cuerpo: {'usuarioId': hugo, 'tipo': 'entrada'}, token: admin)).estado, 201);
     expect((await pedir('POST', '/api/fichajes', cuerpo: {'usuarioId': ana, 'tipo': 'vuelta'}, token: admin)).estado, 409);
@@ -189,16 +200,24 @@ void main() {
   });
 
   test('la base de datos no deja modificar ni borrar fichajes', () async {
-    final admin = bd.usuarioPorCorreo(correoAdmin)!['id'] as int;
-    final id = bd.fichar(usuarioId: admin, tipo: 'entrada', autorId: admin);
-    expect(() => bd.db.execute("UPDATE fichajes SET tipo = 'salida' WHERE id = ?", [id]), throwsA(anything));
-    expect(() => bd.db.execute('DELETE FROM fichajes WHERE id = ?', [id]), throwsA(anything));
+    final admin = (await bd.usuarioPorCorreo(correoAdmin))!['id'] as int;
+    final id = await bd.fichar(usuarioId: admin, tipo: 'entrada', autorId: admin);
+    await expectLater(bd.ejecutar("UPDATE fichajes SET tipo = 'salida' WHERE id = ?", [id]), throwsA(anything));
+    await expectLater(bd.ejecutar('DELETE FROM fichajes WHERE id = ?', [id]), throwsA(anything));
+  });
+
+  test('dos altas a la vez con el mismo correo: la segunda es CorreoRepetido', () async {
+    await bd.crearUsuario(email: 'doble@forja.es', nombre: 'Uno', contrasena: 'Clave1234', rol: 'socio');
+    await expectLater(
+      bd.crearUsuario(email: 'DOBLE@forja.es', nombre: 'Dos', contrasena: 'Clave1234', rol: 'socio'),
+      throwsA(isA<CorreoRepetido>()),
+    );
   });
 
   test('el CSV neutraliza fórmulas de hoja de cálculo', () async {
     final admin = await entrar(correoAdmin, 'alvaro');
     await crearTrabajador(admin, 'x@forja.es', nombre: '=HYPERLINK("http://x")');
-    final id = bd.usuarioPorCorreo('x@forja.es')!['id'] as int;
+    final id = (await bd.usuarioPorCorreo('x@forja.es'))!['id'] as int;
     await pedir('POST', '/api/fichajes', cuerpo: {'usuarioId': id, 'tipo': 'entrada'}, token: admin);
     final csv = await pedir('GET', '/api/fichajes.csv', token: admin);
     expect(csv.estado, 200);
@@ -274,7 +293,7 @@ void main() {
   test('un fichaje se corrige una sola vez y siempre desde el original', () async {
     final admin = await entrar(correoAdmin, 'alvaro');
     await crearTrabajador(admin, 'ana@forja.es');
-    final ana = bd.usuarioPorCorreo('ana@forja.es')!['id'] as int;
+    final ana = (await bd.usuarioPorCorreo('ana@forja.es'))!['id'] as int;
     await pedir('POST', '/api/fichajes', cuerpo: {'usuarioId': ana, 'tipo': 'entrada'}, token: admin);
     final original = ((await pedir('GET', '/api/fichajes', token: admin)).json['fichajes'] as List).first['id'] as int;
     final cuerpo = {

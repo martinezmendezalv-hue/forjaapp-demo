@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
@@ -170,28 +172,49 @@ class ControladorCaptcha extends ChangeNotifier {
   Uint8List? imagen;
   String? error;
   bool cargando = false;
+
+  /// El servidor de la nube está despertando (la petición tarda).
+  bool lento = false;
   final texto = TextEditingController();
+  int _peticion = 0;
+  bool _cerrado = false;
 
   Future<void> nuevo() async {
+    final mia = ++_peticion;
     cargando = true;
+    lento = false;
     error = null;
     texto.clear();
     notifyListeners();
+    final aviso = Timer(const Duration(seconds: 4), () {
+      if (mia == _peticion && cargando && !_cerrado) {
+        lento = true;
+        notifyListeners();
+      }
+    });
+    String? fallo;
+    ({String id, Uint8List imagen})? c;
     try {
-      final c = await sesion.api.captcha();
-      id = c.id;
-      imagen = c.imagen;
+      c = await sesion.api.captcha();
     } on ErrorServidor catch (e) {
-      id = null;
-      imagen = null;
-      error = e.mensaje;
+      fallo = e.mensaje;
+    } catch (_) {
+      fallo = 'No se ha podido cargar la imagen de verificación. Pulsa el botón de recargar.';
     }
+    aviso.cancel();
+    // Si mientras tanto se pidió otra (o se cambió de servidor), esta ya no vale.
+    if (mia != _peticion || _cerrado) return;
+    id = c?.id;
+    imagen = c?.imagen;
+    error = fallo;
     cargando = false;
+    lento = false;
     notifyListeners();
   }
 
   @override
   void dispose() {
+    _cerrado = true;
     texto.dispose();
     super.dispose();
   }
@@ -207,9 +230,25 @@ class Captcha extends StatefulWidget {
 }
 
 class _CaptchaState extends State<Captcha> {
+  late String _servidor = sesion.servidor;
+
   @override
   void initState() {
     super.initState();
+    sesion.addListener(_alCambiarSesion);
+    widget.controller.nuevo();
+  }
+
+  @override
+  void dispose() {
+    sesion.removeListener(_alCambiarSesion);
+    super.dispose();
+  }
+
+  /// Al elegir otro servidor, el código anterior ya no sirve: se pide otro.
+  void _alCambiarSesion() {
+    if (sesion.servidor == _servidor) return;
+    _servidor = sesion.servidor;
     widget.controller.nuevo();
   }
 
@@ -239,7 +278,13 @@ class _CaptchaState extends State<Captcha> {
                       ? Semantics(
                           label: 'Imagen de verificación con letras y números',
                           image: true,
-                          child: Image.memory(c.imagen!, fit: BoxFit.cover, gaplessPlayback: true),
+                          child: Image.memory(
+                            c.imagen!,
+                            fit: BoxFit.cover,
+                            gaplessPlayback: true,
+                            errorBuilder: (_, __, ___) =>
+                                const Center(child: Icon(Icons.broken_image_outlined, color: Forja.gris)),
+                          ),
                         )
                       : const Center(child: Icon(Icons.cloud_off_rounded, color: Forja.gris)),
             ),
@@ -263,6 +308,10 @@ class _CaptchaState extends State<Captcha> {
               prefixIcon: Icon(Icons.shield_outlined),
             ),
           ),
+          if (c.lento) ...[
+            const SizedBox(height: Esp.xs),
+            const Text('Despertando el servidor… la primera vez puede tardar hasta un minuto.', style: Txt.secundario),
+          ],
           if (c.error != null) ...[
             const SizedBox(height: Esp.xs),
             Text(c.error!, style: const TextStyle(color: Forja.rojo, fontSize: 13)),
@@ -633,12 +682,12 @@ Future<void> configurarServidor(BuildContext context) async {
         final api = ForjaApi(Sesion.normalizar(ctrl.text));
         try {
           await api.comprobar();
-          final local = Sesion.esRedLocal(ctrl.text);
+          final local = Sesion.esDeConfianza(ctrl.text);
           setSt(() {
             ok = local;
             estado = local
                 ? 'Conectado con ForjaApp Servidor.'
-                : 'Responde, pero esa dirección no es de la red local del gimnasio. '
+                : 'Responde, pero no es el servidor de ForjaApp ni uno de la red local del gimnasio. '
                     'Guárdala solo si sabes que es vuestro servidor: podría ser una trampa para robar contraseñas.';
           });
         } on ErrorServidor catch (e) {
@@ -653,17 +702,27 @@ Future<void> configurarServidor(BuildContext context) async {
       final movil = !kIsWeb &&
           (defaultTargetPlatform == TargetPlatform.android || defaultTargetPlatform == TargetPlatform.iOS);
       return AlertDialog(
-        title: const Text('Servidor del gimnasio'),
+        title: const Text('Servidor'),
         content: SizedBox(
           width: 460,
           child: SingleChildScrollView(
             child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
               const Text(
-                'Abre ForjaApp Servidor en el PC del gimnasio y copia aquí la dirección que aparece, '
-                'por ejemplo http://192.168.1.40:8080. El móvil tiene que estar en la misma wifi.',
+                'Lo normal es usar el servidor de ForjaApp en internet, que funciona desde cualquier red. '
+                'Si el gimnasio usa ForjaApp Servidor en su PC, escribe la dirección que aparece en su '
+                'ventana (por ejemplo http://192.168.1.40:8080) o escanea su QR; entonces hay que estar en esa wifi.',
                 style: Txt.secundario,
               ),
-              const SizedBox(height: Esp.l),
+              const SizedBox(height: Esp.s),
+              TextButton.icon(
+                onPressed: () {
+                  ctrl.text = Sesion.servidorNube;
+                  probar();
+                },
+                icon: const Icon(Icons.cloud_outlined),
+                label: const Text('Usar el servidor de internet'),
+              ),
+              const SizedBox(height: Esp.s),
               TextField(
                 controller: ctrl,
                 keyboardType: TextInputType.url,

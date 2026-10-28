@@ -74,15 +74,17 @@ class _PantallaServidorState extends State<PantallaServidor> {
         alRegistrar: _anotar,
       );
       final ips = await direccionesLocales();
+      final cuantos = await s.bd.recuento();
       if (!mounted) return;
       setState(() {
         servidor = s;
         direcciones = ips;
-        recuento = s.bd.recuento();
+        recuento = cuantos;
       });
       _anotar('Servidor en marcha en el puerto $puerto');
-      _refresco = Timer.periodic(const Duration(seconds: 3), (_) {
-        if (mounted && servidor != null) setState(() => recuento = servidor!.bd.recuento());
+      _refresco = Timer.periodic(const Duration(seconds: 3), (_) async {
+        final cuantos = await servidor?.bd.recuento();
+        if (mounted && cuantos != null) setState(() => recuento = cuantos);
       });
     } on SocketException {
       setState(() => error =

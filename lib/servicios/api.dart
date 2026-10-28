@@ -75,7 +75,9 @@ class ForjaApi {
   String? token;
   final _http = http.Client();
 
-  static const _espera = Duration(seconds: 15);
+  /// El servidor gratuito de la nube se duerme si nadie lo usa y tarda
+  /// hasta un minuto en despertar: hay que esperarle.
+  static const _espera = Duration(seconds: 75);
 
   Future<dynamic> _pedir(String metodo, String ruta, {Object? cuerpo, bool texto = false}) async {
     if (base.isEmpty) throw ErrorServidor('Primero indica la dirección del servidor.');
@@ -90,10 +92,11 @@ class ForjaApi {
       if (cuerpo != null) req.body = jsonEncode(cuerpo);
       r = await http.Response.fromStream(await _http.send(req).timeout(_espera));
     } on TimeoutException {
-      throw ErrorServidor('El servidor no responde. Comprueba que ForjaApp Servidor está abierto en el PC.');
+      throw ErrorServidor('El servidor no responde. Comprueba tu conexión a internet y vuelve a intentarlo.');
     } catch (_) {
       throw ErrorServidor(
-          'No se puede conectar con el servidor ($base). Comprueba que ForjaApp Servidor está abierto y que estás en la misma wifi.');
+          'No se puede conectar con el servidor ($base). Comprueba tu conexión a internet '
+          '(si usas el servidor del PC del gimnasio, que esté abierto y estés en su wifi).');
     }
     if (texto && r.statusCode == 200) return utf8.decode(r.bodyBytes);
     dynamic datos;

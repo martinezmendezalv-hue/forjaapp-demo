@@ -3,7 +3,6 @@ import 'dart:convert';
 
 import 'package:shelf/shelf.dart';
 import 'package:shelf_router/shelf_router.dart';
-import 'package:sqlite3/sqlite3.dart';
 
 import 'bd.dart';
 import 'planes.dart';
@@ -21,9 +20,12 @@ class ErrorApi implements Exception {
 /// API REST de ForjaApp. Los permisos se comprueban siempre aquí, en el
 /// servidor: la app solo esconde botones, no decide quién puede qué.
 class ForjaApi {
-  ForjaApi(this.bd, {this.alRegistrar});
+  ForjaApi(this.bd, {this.alRegistrar, this.trasProxy = false});
 
   final BaseDatos bd;
+
+  /// El servidor está detrás de un proxy de confianza (Render).
+  final bool trasProxy;
 
   /// Para que la ventana del servidor enseñe la actividad (sin datos personales).
   final void Function(String linea)? alRegistrar;
@@ -79,7 +81,14 @@ class ForjaApi {
         headers: {'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store'},
       );
 
-  static String _ip(Request req) {
+  String _ip(Request req) {
+    // En la nube todas las peticiones llegan desde el proxy de Render: la IP
+    // de verdad es la última que él añade a X-Forwarded-For (las anteriores
+    // las puede inventar el cliente).
+    if (trasProxy) {
+      final reenvio = req.headers['x-forwarded-for'];
+      if (reenvio != null && reenvio.trim().isNotEmpty) return reenvio.split(',').last.trim();
+    }
     final info = req.context['shelf.io.connection_info'];
     try {
       return (info as dynamic).remoteAddress.address as String;
@@ -129,15 +138,15 @@ class ForjaApi {
     return t.isEmpty || t.length > 200 ? null : t;
   }
 
-  Row _sesion(Request req, {List<String>? roles}) {
+  Future<Fila> _sesion(Request req, {List<String>? roles}) async {
     final t = _token(req);
-    final u = t == null ? null : bd.usuarioDeSesion(t);
+    final u = t == null ? null : await bd.usuarioDeSesion(t);
     if (u == null) throw ErrorApi(401, 'Tu sesión ha caducado. Vuelve a iniciar sesión.');
     if (roles != null && !roles.contains(u['rol'])) throw ErrorApi(403, 'Tu cuenta no tiene permiso para esto.');
     return u;
   }
 
-  static Map<String, Object?> _usuarioJson(Row u, {bool conSecreto = false}) => {
+  static Map<String, Object?> _usuarioJson(Fila u, {bool conSecreto = false}) => {
         'id': u['id'],
         'email': u['email'],
         'nombre': u['nombre'],
@@ -157,9 +166,6 @@ class ForjaApi {
       return _json(e.estado, {'error': e.mensaje});
     } on ServidorOcupado {
       return _json(503, {'error': 'El servidor está ocupado. Inténtalo de nuevo en unos segundos.'});
-    } on SqliteException catch (e) {
-      alRegistrar?.call('Error de base de datos en ${req.url.path}: ${e.message}');
-      return _json(500, {'error': 'No se ha podido guardar. Inténtalo de nuevo.'});
     } catch (e) {
       alRegistrar?.call('Error interno en ${req.url.path}: ${e.runtimeType}');
       return _json(500, {'error': 'Error interno del servidor.'});
@@ -171,7 +177,7 @@ class ForjaApi {
   Response _salud(Request req) =>
       _json(200, {'ok': true, 'servicio': 'ForjaApp Servidor', 'version': versionServidor});
 
-  Future<Response> _captcha(Request req) => _seguro(req, () {
+  Future<Response> _captcha(Request req) => _seguro(req, () async {
         final ip = _ip(req);
         if (_captchasIp.bloqueado(ip)) throw ErrorApi(429, 'Demasiadas peticiones. Espera un minuto.');
         _captchasIp.fallo(ip); // cuenta todas las peticiones de captcha
@@ -198,20 +204,20 @@ class ForjaApi {
         if (problema != null) throw ErrorApi(400, problema);
         if (pass != pass2) throw ErrorApi(400, 'Las contraseñas no coinciden.');
         if (d['acepta'] != true) throw ErrorApi(400, 'Tienes que aceptar las condiciones para crear la cuenta.');
-        if (bd.existeCorreo(email)) throw ErrorApi(409, 'Ya hay una cuenta con ese correo. Inicia sesión.');
+        if (await bd.existeCorreo(email)) throw ErrorApi(409, 'Ya hay una cuenta con ese correo. Inicia sesión.');
 
         // Quien se registra solo es socio: los demás roles los da la gerencia.
         final int id;
         try {
           id = await bd.crearUsuario(email: email, nombre: nombre, contrasena: pass, rol: 'socio');
-        } on SqliteException {
+        } on CorreoRepetido {
           // Dos altas a la vez con el mismo correo: la segunda choca con UNIQUE.
           throw ErrorApi(409, 'Ya hay una cuenta con ese correo. Inicia sesión.');
         }
         _altasIp.fallo(ip);
         alRegistrar?.call('Nueva cuenta de socio (#$id)');
-        final token = bd.crearSesion(id);
-        return _json(201, {'token': token, 'usuario': _usuarioJson(bd.usuarioPorId(id)!, conSecreto: true)});
+        final token = await bd.crearSesion(id);
+        return _json(201, {'token': token, 'usuario': _usuarioJson((await bd.usuarioPorId(id))!, conSecreto: true)});
       });
 
   Future<Response> _login(Request req) => _seguro(req, () async {
@@ -230,7 +236,7 @@ class ForjaApi {
         if (email.isEmpty || pass is! String || pass.isEmpty || pass.length > 128) {
           throw ErrorApi(400, 'Escribe tu correo y tu contraseña.');
         }
-        final u = bd.usuarioPorCorreo(email);
+        final u = await bd.usuarioPorCorreo(email);
         final ok = u == null
             ? await trabajoSenuelo(pass).then((_) => false)
             : await verificarContrasena(pass, u['hash'] as String);
@@ -244,21 +250,21 @@ class ForjaApi {
         }
         _fallosCorreoIp.limpiar(correoIp);
         alRegistrar?.call('Sesión iniciada (#${u!['id']}, ${u['rol']})');
-        return _json(200, {'token': bd.crearSesion(u!['id'] as int), 'usuario': _usuarioJson(u, conSecreto: true)});
+        return _json(200, {'token': await bd.crearSesion(u!['id'] as int), 'usuario': _usuarioJson(u, conSecreto: true)});
       });
 
   // ---------------------------------------------------------- con sesión
 
-  Future<Response> _salir(Request req) => _seguro(req, () {
+  Future<Response> _salir(Request req) => _seguro(req, () async {
         final t = _token(req);
-        if (t != null) bd.cerrarSesion(t);
+        if (t != null) await bd.cerrarSesion(t);
         return _json(200, {'ok': true});
       });
 
-  Future<Response> _yo(Request req) => _seguro(req, () => _json(200, {'usuario': _usuarioJson(_sesion(req), conSecreto: true)}));
+  Future<Response> _yo(Request req) => _seguro(req, () async => _json(200, {'usuario': _usuarioJson(await _sesion(req), conSecreto: true)}));
 
   Future<Response> _cambiarContrasena(Request req) => _seguro(req, () async {
-        final u = _sesion(req);
+        final u = await _sesion(req);
         final d = await _cuerpo(req);
         final actual = d['actual'], nueva = d['nueva'], nueva2 = d['nueva2'];
         if (actual is! String || nueva is! String || nueva2 is! String) throw ErrorApi(400, 'Faltan datos.');
@@ -271,30 +277,30 @@ class ForjaApi {
         final problema = problemaContrasena(nueva);
         if (problema != null) throw ErrorApi(400, problema);
         if (nueva != nueva2) throw ErrorApi(400, 'Las contraseñas nuevas no coinciden.');
-        bd.cambiarHash(u['id'] as int, await hashContrasena(nueva));
-        bd.cerrarOtrasSesiones(u['id'] as int, _token(req)!);
+        await bd.cambiarHash(u['id'] as int, await hashContrasena(nueva));
+        await bd.cerrarOtrasSesiones(u['id'] as int, _token(req)!);
         alRegistrar?.call('Contraseña cambiada (#${u['id']})');
         return _json(200, {'ok': true});
       });
 
   Future<Response> _suscribir(Request req) => _seguro(req, () async {
-        final u = _sesion(req, roles: ['socio']);
+        final u = await _sesion(req, roles: ['socio']);
         final d = await _cuerpo(req);
         final plan = planPorId(_cadena(d, 'plan'));
         if (plan == null) throw ErrorApi(400, 'Ese plan no existe.');
-        bd.suscribir(u['id'] as int, plan.id);
+        await bd.suscribir(u['id'] as int, plan.id);
         alRegistrar?.call('Suscripción ${plan.nombre} (#${u['id']})');
-        return _json(200, {'usuario': _usuarioJson(bd.usuarioPorId(u['id'] as int)!, conSecreto: true)});
+        return _json(200, {'usuario': _usuarioJson((await bd.usuarioPorId(u['id'] as int))!, conSecreto: true)});
       });
 
   Future<Response> _contacto(Request req) => _seguro(req, () async {
-        final u = _sesion(req);
+        final u = await _sesion(req);
         final clave = 'contacto:${u['id']}';
         if (_mensajesUsuario.bloqueado(clave)) throw ErrorApi(429, 'Has enviado muchos mensajes seguidos. Espera un poco.');
         final d = await _cuerpo(req);
         final asunto = _texto(d, 'asunto', min: 3, max: 80, nombre: 'el asunto');
         final texto = _texto(d, 'texto', min: 10, max: 2000, nombre: 'el mensaje');
-        bd.guardarMensaje(usuarioId: u['id'] as int, asunto: asunto, texto: texto);
+        await bd.guardarMensaje(usuarioId: u['id'] as int, asunto: asunto, texto: texto);
         _mensajesUsuario.fallo(clave);
         alRegistrar?.call('Mensaje nuevo para gerencia');
         return _json(201, {'ok': true});
@@ -302,11 +308,11 @@ class ForjaApi {
 
   // ------------------------------------------------------------ gerencia
 
-  Future<Response> _mensajes(Request req) => _seguro(req, () {
-        _sesion(req, roles: ['admin']);
+  Future<Response> _mensajes(Request req) => _seguro(req, () async {
+        await _sesion(req, roles: ['admin']);
         return _json(200, {
           'mensajes': [
-            for (final m in bd.mensajes())
+            for (final m in await bd.mensajes())
               {
                 'id': m['id'],
                 'asunto': m['asunto'],
@@ -321,22 +327,22 @@ class ForjaApi {
         });
       });
 
-  Future<Response> _leido(Request req, String id) => _seguro(req, () {
-        _sesion(req, roles: ['admin']);
-        if (!bd.marcarLeido(int.parse(id))) throw ErrorApi(404, 'Ese mensaje no existe.');
+  Future<Response> _leido(Request req, String id) => _seguro(req, () async {
+        await _sesion(req, roles: ['admin']);
+        if (!await bd.marcarLeido(int.parse(id))) throw ErrorApi(404, 'Ese mensaje no existe.');
         return _json(200, {'ok': true});
       });
 
-  Future<Response> _usuarios(Request req) => _seguro(req, () {
-        _sesion(req, roles: ['admin']);
+  Future<Response> _usuarios(Request req) => _seguro(req, () async {
+        await _sesion(req, roles: ['admin']);
         return _json(200, {
-          'usuarios': [for (final u in bd.usuarios()) _usuarioJson(u)],
-          'recuento': bd.recuento(),
+          'usuarios': [for (final u in await bd.usuarios()) _usuarioJson(u)],
+          'recuento': await bd.recuento(),
         });
       });
 
   Future<Response> _crearCuenta(Request req) => _seguro(req, () async {
-        final admin = _sesion(req, roles: ['admin']);
+        final admin = await _sesion(req, roles: ['admin']);
         final d = await _cuerpo(req);
         final nombre = _texto(d, 'nombre', min: 2, max: 60, nombre: 'el nombre');
         final email = _texto(d, 'email', min: 3, max: 254, nombre: 'el correo').toLowerCase();
@@ -350,16 +356,16 @@ class ForjaApi {
         final problema = problemaContrasena(pass);
         if (problema != null) throw ErrorApi(400, problema);
         if (pass != pass2) throw ErrorApi(400, 'Las contraseñas no coinciden.');
-        if (bd.existeCorreo(email)) throw ErrorApi(409, 'Ya hay una cuenta con ese correo.');
+        if (await bd.existeCorreo(email)) throw ErrorApi(409, 'Ya hay una cuenta con ese correo.');
         final id = await bd.crearUsuario(
             email: email, nombre: nombre, contrasena: pass, rol: rol as String, creadoPor: admin['id'] as int);
         alRegistrar?.call('Gerencia crea cuenta de $rol (#$id)');
-        return _json(201, {'usuario': _usuarioJson(bd.usuarioPorId(id)!)});
+        return _json(201, {'usuario': _usuarioJson((await bd.usuarioPorId(id))!)});
       });
 
   // ------------------------------------------------------------ fichajes
 
-  static Map<String, Object?> _fichajeJson(Row f) => {
+  static Map<String, Object?> _fichajeJson(Fila f) => {
         'id': f['id'],
         'usuarioId': f['usuario_id'],
         'empleado': f['empleado'],
@@ -379,14 +385,14 @@ class ForjaApi {
         _ => ['entrada'],
       };
 
-  Future<Response> _fichajes(Request req) => _seguro(req, () {
-        final u = _sesion(req, roles: ['admin', 'trabajador']);
+  Future<Response> _fichajes(Request req) => _seguro(req, () async {
+        final u = await _sesion(req, roles: ['admin', 'trabajador']);
         // Un trabajador solo ve sus propios fichajes.
         final propios = u['rol'] == 'trabajador';
-        final lista = bd.fichajes(usuarioId: propios ? u['id'] as int : null);
+        final lista = await bd.fichajes(usuarioId: propios ? u['id'] as int : null);
         final plantilla = propios
             ? [u]
-            : bd.usuarios().where((x) => x['rol'] == 'trabajador' || x['rol'] == 'admin').toList();
+            : (await bd.usuarios()).where((x) => x['rol'] == 'trabajador' || x['rol'] == 'admin').toList();
         return _json(200, {
           'fichajes': [for (final f in lista) _fichajeJson(f)],
           'plantilla': [
@@ -396,8 +402,8 @@ class ForjaApi {
                 'nombre': p['nombre'],
                 'email': p['email'],
                 'rol': p['rol'],
-                'ultimo': bd.ultimoTipo(p['id'] as int),
-                'posibles': posibles(bd.ultimoTipo(p['id'] as int)),
+                'ultimo': await bd.ultimoTipo(p['id'] as int),
+                'posibles': posibles(await bd.ultimoTipo(p['id'] as int)),
               }
           ],
           'puedeModificar': !propios,
@@ -405,28 +411,28 @@ class ForjaApi {
       });
 
   Future<Response> _fichar(Request req) => _seguro(req, () async {
-        final admin = _sesion(req, roles: ['admin']);
+        final admin = await _sesion(req, roles: ['admin']);
         final d = await _cuerpo(req);
         final id = d['usuarioId'];
         final tipo = d['tipo'];
         if (id is! int || tipo is! String || !tiposFichaje.contains(tipo)) throw ErrorApi(400, 'Datos de fichaje no válidos.');
-        final empleado = bd.usuarioPorId(id);
+        final empleado = await bd.usuarioPorId(id);
         if (empleado == null || empleado['rol'] == 'socio') throw ErrorApi(404, 'Ese empleado no existe.');
-        if (!posibles(bd.ultimoTipo(id)).contains(tipo)) {
-          throw ErrorApi(409, 'Ese fichaje no encaja con el anterior (${bd.ultimoTipo(id) ?? 'ninguno'}).');
+        if (!posibles(await bd.ultimoTipo(id)).contains(tipo)) {
+          throw ErrorApi(409, 'Ese fichaje no encaja con el anterior (${await bd.ultimoTipo(id) ?? 'ninguno'}).');
         }
-        bd.fichar(usuarioId: id, tipo: tipo, autorId: admin['id'] as int);
+        await bd.fichar(usuarioId: id, tipo: tipo, autorId: admin['id'] as int);
         return _json(201, {'ok': true});
       });
 
   Future<Response> _corregir(Request req, String idTexto) => _seguro(req, () async {
-        final admin = _sesion(req, roles: ['admin']);
-        final original = bd.fichaje(int.parse(idTexto));
+        final admin = await _sesion(req, roles: ['admin']);
+        final original = await bd.fichaje(int.parse(idTexto));
         if (original == null) throw ErrorApi(404, 'Ese fichaje no existe.');
         // Se corrige siempre el registro original y una sola vez: así una
         // cadena de correcciones no puede ir moviendo un fichaje sin límite.
         if (original['corrige_a'] != null) throw ErrorApi(409, 'Eso ya es una corrección: corrige el registro original.');
-        if (bd.yaCorregido(original['id'] as int)) throw ErrorApi(409, 'Ese fichaje ya se corrigió.');
+        if (await bd.yaCorregido(original['id'] as int)) throw ErrorApi(409, 'Ese fichaje ya se corrigió.');
         final d = await _cuerpo(req);
         final motivo = _texto(d, 'motivo', min: 3, max: 200, nombre: 'el motivo');
         final momento = DateTime.tryParse(d['momento'] is String ? d['momento'] as String : '');
@@ -436,7 +442,7 @@ class ForjaApi {
         if (momento.isAfter(DateTime.now().add(const Duration(minutes: 1)))) {
           throw ErrorApi(400, 'No se puede fichar en el futuro.');
         }
-        bd.fichar(
+        await bd.fichar(
           usuarioId: original['usuario_id'] as int,
           tipo: original['tipo'] as String,
           autorId: admin['id'] as int,
@@ -454,10 +460,10 @@ class ForjaApi {
     return t;
   }
 
-  Future<Response> _csv(Request req) => _seguro(req, () {
-        _sesion(req, roles: ['admin']);
+  Future<Response> _csv(Request req) => _seguro(req, () async {
+        await _sesion(req, roles: ['admin']);
         final b = StringBuffer('empleado;correo;tipo;fecha_hora;registrado;autor;corrige_a;motivo\n');
-        for (final f in bd.fichajes().reversed) {
+        for (final f in (await bd.fichajes()).reversed) {
           b.writeln([
             f['empleado'],
             f['empleado_email'],
@@ -479,7 +485,7 @@ class ForjaApi {
   // --------------------------------------------------------------- acceso
 
   Future<Response> _validarAcceso(Request req) => _seguro(req, () async {
-        final lector = _sesion(req, roles: ['admin', 'trabajador']);
+        final lector = await _sesion(req, roles: ['admin', 'trabajador']);
         final clave = '${lector['id']}';
         if (_lecturasLector.bloqueado(clave)) throw ErrorApi(429, 'Demasiadas lecturas seguidas. Espera un momento.');
         _lecturasLector.fallo(clave);
@@ -489,7 +495,7 @@ class ForjaApi {
         final p = token.split('-');
         final uid = p.length == 4 && p[0] == 'FORJA2' ? int.tryParse(p[1]) : null;
         final ventana = uid == null ? null : int.tryParse(p[2]);
-        final socio = uid == null ? null : bd.usuarioPorId(uid);
+        final socio = uid == null ? null : await bd.usuarioPorId(uid);
         if (socio == null || ventana == null || socio['rol'] != 'socio') {
           return _json(200, {'resultado': 'desconocido'});
         }
@@ -511,7 +517,7 @@ class ForjaApi {
           resultado = 'concedido';
           _ultimaVentanaQr[uid] = ventana;
         }
-        bd.registrarAcceso(usuarioId: uid, resultado: resultado, lectorId: lector['id'] as int);
+        await bd.registrarAcceso(usuarioId: uid, resultado: resultado, lectorId: lector['id'] as int);
         return _json(200, {
           'resultado': resultado,
           'socio': {'id': uid, 'nombre': socio['nombre'], 'plan': socio['plan']},
@@ -530,7 +536,7 @@ bool origenPermitido(String origen, String? host) {
   final u = Uri.tryParse(origen);
   if (u == null || (u.scheme != 'http' && u.scheme != 'https')) return false;
   if (u.host == 'localhost' || u.host == '127.0.0.1') return true;
-  return host != null && origen == 'http://$host';
+  return host != null && (origen == 'http://$host' || origen == 'https://$host');
 }
 
 /// Política de contenido para la web de ForjaApp (Flutter carga CanvasKit

@@ -1,0 +1,16 @@
+# Servidor de ForjaApp en Render (plan gratuito). La base de datos está en
+# Neon: al crear el servicio, Render pide DATABASE_URL y ADMIN_CONTRASENA.
+services:
+  - type: web
+    name: forjaapp-servidor
+    runtime: docker
+    plan: free
+    region: frankfurt
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /api/salud
+    autoDeploy: true
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: ADMIN_CONTRASENA
+        sync: false

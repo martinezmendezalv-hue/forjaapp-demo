@@ -21,23 +21,23 @@ class Sesion extends ChangeNotifier {
   bool get iniciada => usuario != null;
   String get servidor => api.base;
 
-  /// En la web servida por ForjaApp Servidor, el servidor es la propia
-  /// página. En Windows, normalmente está en el mismo PC.
-  static String _servidorPorDefecto() {
-    if (kIsWeb) {
-      final b = Uri.base;
-      if (b.scheme == 'http' && !b.host.endsWith('github.io')) return b.origin;
-      return 'http://localhost:8080';
-    }
-    final movil = defaultTargetPlatform == TargetPlatform.android || defaultTargetPlatform == TargetPlatform.iOS;
-    return movil ? '' : 'http://localhost:8080';
-  }
+  /// Servidor de ForjaApp en internet (Render + base de datos Neon): funciona
+  /// desde cualquier red, con datos móviles o con otra wifi.
+  static const servidorNube =
+      String.fromEnvironment('SERVIDOR_NUBE', defaultValue: 'https://forjaapp-servidor.onrender.com');
+
+  /// La web que sirve un ForjaApp Servidor (el de la nube o el del PC del
+  /// gimnasio) usa siempre ese mismo servidor.
+  static bool get _webDeUnServidor =>
+      kIsWeb && (Uri.base.scheme == 'http' || Uri.base.scheme == 'https') && !Uri.base.host.endsWith('github.io');
+
+  static String _servidorPorDefecto() => _webDeUnServidor ? Uri.base.origin : servidorNube;
 
   Future<void> cargar() async {
     try {
       final p = await SharedPreferences.getInstance();
       final guardado = p.getString('servidor');
-      if (guardado != null && guardado.isNotEmpty && !(kIsWeb && Uri.base.scheme == 'http')) api.base = guardado;
+      if (guardado != null && guardado.isNotEmpty && !_webDeUnServidor) api.base = guardado;
       ultimoCorreo = p.getString('correo') ?? '';
     } catch (_) {}
     notifyListeners();
@@ -50,15 +50,19 @@ class Sesion extends ChangeNotifier {
     if (!t.startsWith('http://') && !t.startsWith('https://')) t = 'http://$t';
     final u = Uri.tryParse(t);
     if (u == null || u.host.isEmpty) return t;
-    return Uri(scheme: u.scheme, host: u.host, port: u.hasPort ? u.port : 8080)
+    // Sin puerto: el del PC del gimnasio es 8080; por https, el normal (443).
+    final puerto = u.hasPort ? u.port : (u.scheme == 'http' ? 8080 : null);
+    return Uri(scheme: u.scheme, host: u.host, port: puerto)
         .toString()
         .replaceAll(RegExp(r'/$'), '');
   }
 
-  /// Si la dirección es de este equipo o de una red local (192.168…, 10…,
+  /// Si la dirección es el servidor de la nube de ForjaApp, este equipo o
+  /// una red local (192.168…, 10…,
   /// 172.16-31…). Un QR que lleve a otro sitio podría ser una trampa para
   /// robar contraseñas, así que la app avisa antes de usarlo.
-  static bool esRedLocal(String direccion) {
+  static bool esDeConfianza(String direccion) {
+    if (normalizar(direccion) == servidorNube) return true;
     final host = Uri.tryParse(normalizar(direccion))?.host ?? '';
     if (host == 'localhost' || host.endsWith('.local')) return true;
     final p = host.split('.').map(int.tryParse).toList();
