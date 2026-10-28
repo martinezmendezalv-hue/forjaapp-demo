@@ -187,8 +187,62 @@ jobs:
           name: android
           path: ForjaApp-Demo.apk
 
+  ios:
+    # Sin cuenta de pago de Apple: se compila sin firmar y se firma al
+    # instalarlo con Sideloadly y un Apple ID gratuito (caduca a los 7 días).
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      # Flutter 3.27 se probó con Xcode 16.
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: '16.4'
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.27.4
+          channel: stable
+          cache: true
+
+      - name: Generar la parte de iOS del proyecto
+        run: flutter create --platforms=ios --org es.forja --project-name forja_app_demo .
+
+      - name: Nombre, permisos, versión mínima e icono
+        run: |
+          P=ios/Runner/Info.plist
+          B=/usr/libexec/PlistBuddy
+          $B -c "Set :CFBundleDisplayName ForjaApp" $P
+          $B -c "Add :NSCameraUsageDescription string 'La cámara lee los pases QR en el control de acceso.'" $P
+          $B -c "Add :NSLocalNetworkUsageDescription string 'ForjaApp se conecta al servidor del gimnasio en la wifi.'" $P
+          # El servidor del gimnasio va por http dentro de la red local.
+          $B -c "Add :NSAppTransportSecurity dict" $P
+          $B -c "Add :NSAppTransportSecurity:NSAllowsArbitraryLoads bool true" $P
+          # mobile_scanner (ML Kit) necesita iOS 15.5 o superior.
+          sed -i '' "s/^# platform :ios.*/platform :ios, '15.5'/" ios/Podfile
+          sed -i '' 's/IPHONEOS_DEPLOYMENT_TARGET = [0-9.]*;/IPHONEOS_DEPLOYMENT_TARGET = 15.5;/' ios/Runner.xcodeproj/project.pbxproj
+          cd ios/Runner/Assets.xcassets/AppIcon.appiconset
+          for f in *.png; do
+            t=$(sips -g pixelWidth "$f" | awk '/pixelWidth/ {print $2}')
+            sips -s format png -z "$t" "$t" ../../../../assets/forja.png --out "$f" > /dev/null
+          done
+
+      - run: flutter pub get
+
+      - name: Compilar el IPA
+        run: |
+          flutter build ios --release --no-codesign --build-number=${{ github.run_number }}
+          mkdir Payload
+          cp -R build/ios/iphoneos/Runner.app Payload/
+          zip -qry ForjaApp-Demo.ipa Payload
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ios
+          path: ForjaApp-Demo.ipa
+
   publicar:
-    needs: [windows, android, servidor]
+    needs: [windows, android, ios, servidor]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -204,14 +258,16 @@ jobs:
         run: |
           gh release delete demo --yes --cleanup-tag || true
           gh release create demo ForjaApp-Servidor-Setup.exe ForjaApp-Servidor-portable.zip \
-            ForjaApp-Demo-Setup.exe ForjaApp-Demo-portable.zip ForjaApp-Demo.apk \
+            ForjaApp-Demo-Setup.exe ForjaApp-Demo-portable.zip ForjaApp-Demo.apk ForjaApp-Demo.ipa \
             --target "$GITHUB_SHA" \
-            --title "ForjaApp - servidor, Windows, Android y web" \
+            --title "ForjaApp - servidor, Windows, Android, iPhone y web" \
             --notes "**Primero, el servidor:** instala ForjaApp-Servidor-Setup.exe en el PC del gimnasio y déjalo abierto. Guarda la base de datos (usuarios, roles, fichajes y mensajes) y sirve la versión web en http://IP-del-PC:8080. La primera vez Windows pregunta por el cortafuegos: permite las redes privadas.
 
           **Windows:** ForjaApp-Demo-Setup.exe (instalador) o ForjaApp-Demo-portable.zip (sin instalar: descomprime y abre forja_app_demo.exe). SmartScreen avisará porque no está firmado: Más información → Ejecutar de todas formas.
 
           **Android:** ForjaApp-Demo.apk. Ábrelo en el móvil y permite instalar apps de origen desconocido. No necesita Google Play ni cuenta de pago.
+
+          **iPhone:** ForjaApp-Demo.ipa. Desde Windows, instálalo con Sideloadly y tu Apple ID (gratis). Después, en el iPhone: Ajustes → General → VPN y gestión de dispositivos → confía en tu Apple ID, y activa el Modo de desarrollador. Con un Apple ID gratuito hay que reinstalarlo cada 7 días.
 
           **Web:** https://${GITHUB_REPOSITORY_OWNER}.github.io/forjaapp-demo/
 

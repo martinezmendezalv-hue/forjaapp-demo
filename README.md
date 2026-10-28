@@ -15,6 +15,7 @@ La idea de negocio: sustituir el WhatsApp, el Excel, el PC de las tarjetas y la 
 | **Windows: instalador** | [ForjaApp-Demo-Setup.exe](https://github.com/martinezmendezalv-hue/forjaapp-demo/releases/download/demo/ForjaApp-Demo-Setup.exe) |
 | **Windows: portable** (sin instalar) | [ForjaApp-Demo-portable.zip](https://github.com/martinezmendezalv-hue/forjaapp-demo/releases/download/demo/ForjaApp-Demo-portable.zip) |
 | **Android** (APK, sin Google Play) | [ForjaApp-Demo.apk](https://github.com/martinezmendezalv-hue/forjaapp-demo/releases/download/demo/ForjaApp-Demo.apk) |
+| **iPhone** (IPA, sin App Store) | [ForjaApp-Demo.ipa](https://github.com/martinezmendezalv-hue/forjaapp-demo/releases/download/demo/ForjaApp-Demo.ipa) |
 | Todas las descargas | [Releases → demo](https://github.com/martinezmendezalv-hue/forjaapp-demo/releases/tag/demo) |
 
 > [!WARNING]
@@ -25,6 +26,12 @@ Para la versión portable: descomprime el zip y abre `forja_app_demo.exe`.
 
 > [!NOTE]
 > **Android:** abre el enlace del APK desde el móvil, descárgalo y tócalo para instalarlo. Android pedirá permitir la instalación de apps de origen desconocido para el navegador o el gestor de archivos: es normal, porque la app no está en Google Play (subirla allí cuesta dinero). No hace falta cuenta ni pago.
+
+> **iPhone:** Apple no deja instalar apps fuera de la App Store sin firmarlas, pero se puede hacer gratis con un Apple ID normal desde Windows:
+> 1. Instala **iTunes** (de apple.com, no la de Microsoft Store) y **[Sideloadly](https://sideloadly.io)**.
+> 2. Conecta el iPhone por cable, ábrelo en Sideloadly, arrastra `ForjaApp-Demo.ipa`, escribe tu Apple ID y pulsa **Start**.
+> 3. En el iPhone: **Ajustes → General → VPN y gestión de dispositivos** → confía en tu Apple ID. En iOS 16 o posterior activa también **Ajustes → Privacidad y seguridad → Modo de desarrollador** (reinicia el móvil).
+> 4. Con un Apple ID gratuito la firma dura **7 días**: repite el paso 2 (los datos de la app se conservan). Necesita iOS 15.5 o posterior.
 > En **iPhone** usa la versión web: funciona igual, cámara incluida.
 
 Las cuentas, los roles, los fichajes y los mensajes se guardan en **ForjaApp Servidor**, una app de Windows con su base de datos SQLite que corre en el PC del gimnasio. Las clases y reservas de la *App del socio* siguen siendo datos de ejemplo de **hoy**.
@@ -33,7 +40,7 @@ Las cuentas, los roles, los fichajes y los mensajes se guardan en **ForjaApp Ser
 
 1. Instala **ForjaApp-Servidor-Setup.exe** en el PC del gimnasio y ábrelo. La primera vez Windows pregunta por el cortafuegos: marca **redes privadas**. La ventana enseña la dirección (por ejemplo `http://192.168.1.40:8080`) y un QR para conectar el móvil. La base de datos queda en `%APPDATA%\ForjaApp Servidor\forja.db`.
 2. **Web:** abre esa dirección en cualquier navegador de la wifi; el servidor sirve la app web.
-3. **Windows y Android:** en la pantalla de inicio de sesión toca **Servidor → Cambiar** y escribe la dirección (en Android también puedes **escanear el QR** de la ventana del servidor). Si la app de Windows está en el mismo PC, ya apunta a `localhost:8080`.
+3. **Windows, Android e iPhone:** en la pantalla de inicio de sesión toca **Servidor → Cambiar** y escribe la dirección (en el móvil también puedes **escanear el QR** de la ventana del servidor; el iPhone pedirá permiso para la red local). Si la app de Windows está en el mismo PC, ya apunta a `localhost:8080`.
 
 **Iniciar sesión no es lo mismo que registrarse**: quien no tiene cuenta no puede entrar. Las dos pantallas piden un **captcha de letras y números** y tienen el **ojo** para ver la contraseña; el registro pide repetirla y **aceptar las condiciones**.
 

@@ -29,7 +29,8 @@ class Sesion extends ChangeNotifier {
       if (b.scheme == 'http' && !b.host.endsWith('github.io')) return b.origin;
       return 'http://localhost:8080';
     }
-    return defaultTargetPlatform == TargetPlatform.android ? '' : 'http://localhost:8080';
+    final movil = defaultTargetPlatform == TargetPlatform.android || defaultTargetPlatform == TargetPlatform.iOS;
+    return movil ? '' : 'http://localhost:8080';
   }
 
   Future<void> cargar() async {

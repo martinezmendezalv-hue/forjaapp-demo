@@ -650,7 +650,8 @@ Future<void> configurarServidor(BuildContext context) async {
         setSt(() => probando = false);
       }
 
-      final movil = !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
+      final movil = !kIsWeb &&
+          (defaultTargetPlatform == TargetPlatform.android || defaultTargetPlatform == TargetPlatform.iOS);
       return AlertDialog(
         title: const Text('Servidor del gimnasio'),
         content: SizedBox(
