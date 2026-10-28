@@ -1,6 +1,7 @@
 # ForjaApp Servidor en la nube (Render). Compila la web de ForjaApp y el
 # servidor, y deja una imagen pequeña con solo el ejecutable y la web.
-FROM ghcr.io/cirruslabs/flutter:3.27.4 AS compilar
+# (cirruslabs no publicó la 3.27.4; la 3.27.3 es de la misma versión de Flutter)
+FROM ghcr.io/cirruslabs/flutter:3.27.3 AS compilar
 WORKDIR /src
 
 # Primero las dependencias, para que Docker las reutilice entre compilaciones.
