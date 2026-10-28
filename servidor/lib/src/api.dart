@@ -5,6 +5,7 @@ import 'package:shelf/shelf.dart';
 import 'package:shelf_router/shelf_router.dart';
 
 import 'bd.dart';
+import 'correo.dart';
 import 'planes.dart';
 import 'seguridad.dart';
 
@@ -20,9 +21,13 @@ class ErrorApi implements Exception {
 /// API REST de ForjaApp. Los permisos se comprueban siempre aquí, en el
 /// servidor: la app solo esconde botones, no decide quién puede qué.
 class ForjaApi {
-  ForjaApi(this.bd, {this.alRegistrar, this.trasProxy = false});
+  ForjaApi(this.bd, {this.alRegistrar, this.trasProxy = false, this.correo});
 
   final BaseDatos bd;
+
+  /// Para enviar el código de «he olvidado mi contraseña». Sin él, esa
+  /// opción responde que el servidor no envía correos.
+  final EnvioCorreo? correo;
 
   /// El servidor está detrás de un proxy de confianza (Render).
   final bool trasProxy;
@@ -45,6 +50,14 @@ class ForjaApi {
   final _altasIp = LimiteIntentos(maximo: 10, ventana: const Duration(hours: 1));
   final _captchasIp = LimiteIntentos(maximo: 60, ventana: const Duration(minutes: 1));
   final _mensajesUsuario = LimiteIntentos(maximo: 5, ventana: const Duration(hours: 1));
+  // Restablecer la contraseña: pocos correos por cuenta y por equipo (para
+  // no usar el servidor para llenar el buzón de nadie) y pocos códigos mal.
+  final _olvidosCorreo = LimiteIntentos(maximo: 3, ventana: const Duration(hours: 1));
+  final _olvidosIp = LimiteIntentos(maximo: 10, ventana: const Duration(hours: 1));
+  final _codigosMalIp = LimiteIntentos(maximo: 20, ventana: const Duration(minutes: 15));
+
+  static const minutosCodigo = 15;
+  static const intentosCodigo = 5;
 
   static const _maxCuerpo = 32 * 1024;
 
@@ -55,6 +68,8 @@ class ForjaApi {
       ..get('/api/planes', _planes)
       ..post('/api/registro', _registro)
       ..post('/api/login', _login)
+      ..post('/api/olvido', _olvido)
+      ..post('/api/restablecer', _restablecer)
       ..post('/api/salir', _salir)
       ..get('/api/yo', _yo)
       ..post('/api/contrasena', _cambiarContrasena)
@@ -251,6 +266,89 @@ class ForjaApi {
         _fallosCorreoIp.limpiar(correoIp);
         alRegistrar?.call('Sesión iniciada (#${u!['id']}, ${u['rol']})');
         return _json(200, {'token': await bd.crearSesion(u!['id'] as int), 'usuario': _usuarioJson(u, conSecreto: true)});
+      });
+
+  /// Paso 1: pide un código por correo. Responde lo mismo exista o no la
+  /// cuenta, para no revelar qué correos están registrados.
+  Future<Response> _olvido(Request req) => _seguro(req, () async {
+        final ip = _ip(req);
+        final d = await _cuerpo(req);
+        final email = (_cadena(d, 'email') ?? '').trim().toLowerCase();
+        if (email.length > 254 || !correoValido(email)) throw ErrorApi(400, 'Escribe el correo de tu cuenta.');
+        if (!captchas.comprobar(_cadena(d, 'captchaId'), _cadena(d, 'captcha'))) {
+          throw ErrorApi(400, 'El código de verificación no es correcto o ha caducado. Escribe el nuevo.');
+        }
+        final envio = correo;
+        if (envio == null) {
+          throw ErrorApi(503, 'Este servidor no tiene configurado el envío de correos. Pide a gerencia que te ayude.');
+        }
+        if (_olvidosIp.bloqueado(ip) || _olvidosCorreo.bloqueado(email)) {
+          throw ErrorApi(429, 'Ya se han pedido varios códigos. Espera una hora o revisa tu correo (también la carpeta de spam).');
+        }
+        _olvidosIp.fallo(ip);
+        _olvidosCorreo.fallo(email);
+        final u = await bd.usuarioPorCorreo(email);
+        if (u != null) {
+          final id = u['id'] as int;
+          final codigo = codigoNumerico(6);
+          await bd.guardarCodigo(id, sha256Hex('$id:$codigo'), DateTime.now().add(const Duration(minutes: minutosCodigo)));
+          final c = correoCodigo(u['nombre'] as String, codigo, minutosCodigo);
+          // Se envía sin esperar: así la respuesta tarda lo mismo exista o no la cuenta.
+          unawaited(envio.enviar(para: email, asunto: c.asunto, texto: c.texto, html: c.html).then(
+                (_) => alRegistrar?.call('Código de restablecimiento enviado (#$id)'),
+                onError: (Object e) => alRegistrar?.call('No se pudo enviar el correo (#$id): $e'),
+              ));
+        }
+        return _json(200, {
+          'ok': true,
+          'mensaje': 'Si hay una cuenta con ese correo, te hemos enviado un código de 6 cifras. '
+              'Revisa también la carpeta de spam. Caduca en $minutosCodigo minutos.',
+        });
+      });
+
+  /// Paso 2: con el código del correo se pone una contraseña nueva.
+  Future<Response> _restablecer(Request req) => _seguro(req, () async {
+        final ip = _ip(req);
+        if (_codigosMalIp.bloqueado(ip)) throw ErrorApi(429, 'Demasiados códigos incorrectos. Espera 15 minutos.');
+        final d = await _cuerpo(req);
+        final email = (_cadena(d, 'email') ?? '').trim().toLowerCase();
+        final codigo = (_cadena(d, 'codigo') ?? '').trim();
+        final nueva = d['nueva'], nueva2 = d['nueva2'];
+        if (email.isEmpty || email.length > 254 || !RegExp(r'^\d{6}$').hasMatch(codigo)) {
+          throw ErrorApi(400, 'Escribe tu correo y el código de 6 cifras que te hemos enviado.');
+        }
+        if (nueva is! String || nueva2 is! String) throw ErrorApi(400, 'Falta la contraseña nueva.');
+        final problema = problemaContrasena(nueva);
+        if (problema != null) throw ErrorApi(400, problema);
+        if (nueva != nueva2) throw ErrorApi(400, 'Las contraseñas nuevas no coinciden.');
+
+        const invalido = 'El código no es correcto o ha caducado. Pide otro si hace falta.';
+        final u = await bd.usuarioPorCorreo(email);
+        final id = u?['id'] as int?;
+        final guardado = id == null ? null : await bd.codigoDe(id);
+        if (id == null || guardado == null) {
+          _codigosMalIp.fallo(ip);
+          throw ErrorApi(400, invalido);
+        }
+        final ok = igualesSeguro(utf8.encode(sha256Hex('$id:$codigo')), utf8.encode(guardado['codigo_hash'] as String));
+        if (!ok) {
+          _codigosMalIp.fallo(ip);
+          // Tras 5 fallos el código deja de valer: 6 cifras no se adivinan así.
+          if ((guardado['intentos'] as int) + 1 >= intentosCodigo) {
+            await bd.borrarCodigo(id);
+          } else {
+            await bd.sumarIntentoCodigo(id);
+          }
+          throw ErrorApi(400, invalido);
+        }
+        await bd.borrarCodigo(id);
+        await bd.cambiarHash(id, await hashContrasena(nueva));
+        await bd.cerrarTodasSesiones(id);
+        // Quien demuestra que es el dueño del correo puede volver a intentarlo ya.
+        _fallosCorreo.limpiar(email);
+        _fallosCorreoIp.limpiar('$email|$ip');
+        alRegistrar?.call('Contraseña restablecida por correo (#$id)');
+        return _json(200, {'ok': true});
       });
 
   // ---------------------------------------------------------- con sesión

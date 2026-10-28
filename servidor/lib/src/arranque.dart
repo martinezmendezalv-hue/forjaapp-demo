@@ -7,6 +7,7 @@ import 'package:shelf_static/shelf_static.dart';
 
 import 'api.dart';
 import 'bd.dart';
+import 'correo.dart';
 
 class ServidorForja {
   ServidorForja._(this.http, this.bd, this.api);
@@ -30,6 +31,7 @@ class ServidorForja {
     String? urlPostgres,
     String contrasenaAdmin = contrasenaInicialAdmin,
     bool trasProxy = false,
+    EnvioCorreo? correo,
     int puerto = 8080,
     String? carpetaWeb,
     void Function(String linea)? alRegistrar,
@@ -41,7 +43,7 @@ class ServidorForja {
       Directory(p.dirname(rutaBd!)).createSync(recursive: true);
       bd = await BaseDatos.abrir(rutaBd, contrasenaAdmin: contrasenaAdmin);
     }
-    final api = ForjaApi(bd, alRegistrar: alRegistrar, trasProxy: trasProxy);
+    final api = ForjaApi(bd, alRegistrar: alRegistrar, trasProxy: trasProxy, correo: correo);
 
     // /api/* va siempre a la API (sus 404 en JSON no se pierden); el resto, a la web.
     final apiHandler = api.handler;

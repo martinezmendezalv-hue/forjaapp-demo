@@ -14,6 +14,9 @@ Uint8List bytesAleatorios(int n) => Uint8List.fromList(List.generate(n, (_) => _
 /// Token opaco para sesiones y secretos (32 bytes en base64 url).
 String tokenAleatorio([int bytes = 32]) => base64Url.encode(bytesAleatorios(bytes)).replaceAll('=', '');
 
+/// Código de [cifras] dígitos al azar (para el correo de restablecimiento).
+String codigoNumerico(int cifras) => List.generate(cifras, (_) => _azar.nextInt(10)).join();
+
 String sha256Hex(String texto) => sha256.convert(utf8.encode(texto)).toString();
 
 /// Compara sin cortar en el primer byte distinto, para no filtrar

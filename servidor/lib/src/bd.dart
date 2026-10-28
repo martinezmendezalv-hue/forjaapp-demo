@@ -132,6 +132,30 @@ abstract class BaseDatos {
         [usuarioId, sha256Hex(tokenActual)],
       );
 
+  /// Cierra todas las sesiones de una cuenta (al restablecer la contraseña).
+  Future<void> cerrarTodasSesiones(int usuarioId) => ejecutar('DELETE FROM sesiones WHERE usuario_id = ?', [usuarioId]);
+
+  // ------------------------------------------- restablecer la contraseña
+
+  /// Guarda el código enviado por correo (solo su hash). Cada cuenta tiene
+  /// como mucho uno: pedir otro anula el anterior.
+  Future<void> guardarCodigo(int usuarioId, String codigoHash, DateTime caduca) async {
+    await ejecutar('DELETE FROM restablecimientos WHERE usuario_id = ?', [usuarioId]);
+    await ejecutar(
+      'INSERT INTO restablecimientos (usuario_id, codigo_hash, caduca, intentos) VALUES (?, ?, ?, 0)',
+      [usuarioId, codigoHash, caduca.toUtc().toIso8601String()],
+    );
+  }
+
+  Future<Fila?> codigoDe(int usuarioId) =>
+      _una('SELECT * FROM restablecimientos WHERE usuario_id = ? AND caduca > ?', [usuarioId, ahoraIso()]);
+
+  Future<void> sumarIntentoCodigo(int usuarioId) =>
+      ejecutar('UPDATE restablecimientos SET intentos = intentos + 1 WHERE usuario_id = ?', [usuarioId]);
+
+  Future<void> borrarCodigo(int usuarioId) =>
+      ejecutar('DELETE FROM restablecimientos WHERE usuario_id = ?', [usuarioId]);
+
   // ---------------------------------------------------------- fichajes
 
   Future<List<Fila>> fichajes({int? usuarioId}) => consulta('''
@@ -268,6 +292,12 @@ class BaseDatosSqlite extends BaseDatos {
         fecha       TEXT NOT NULL,
         lector_id   INTEGER REFERENCES usuarios(id)
       );
+      CREATE TABLE IF NOT EXISTS restablecimientos (
+        usuario_id  INTEGER PRIMARY KEY REFERENCES usuarios(id) ON DELETE CASCADE,
+        codigo_hash TEXT NOT NULL,
+        caduca      TEXT NOT NULL,
+        intentos    INTEGER NOT NULL DEFAULT 0
+      );
       -- Registro de jornada: nada se modifica ni se borra, ni siquiera
       -- desde fuera de la app. Una corrección es un registro nuevo.
       CREATE TRIGGER IF NOT EXISTS fichajes_no_se_modifican
@@ -393,6 +423,12 @@ const _esquemaPostgres = [
     resultado   TEXT NOT NULL,
     fecha       TEXT NOT NULL,
     lector_id   INTEGER REFERENCES usuarios(id)
+  );
+  CREATE TABLE IF NOT EXISTS restablecimientos (
+    usuario_id  INTEGER PRIMARY KEY REFERENCES usuarios(id) ON DELETE CASCADE,
+    codigo_hash TEXT NOT NULL,
+    caduca      TEXT NOT NULL,
+    intentos    INTEGER NOT NULL DEFAULT 0
   );
   CREATE INDEX IF NOT EXISTS fichajes_usuario ON fichajes (usuario_id, momento);
   CREATE INDEX IF NOT EXISTS sesiones_usuario ON sesiones (usuario_id);

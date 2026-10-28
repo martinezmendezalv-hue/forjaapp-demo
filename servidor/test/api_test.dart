@@ -4,11 +4,26 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:forja_servidor/src/api.dart';
 import 'package:forja_servidor/src/bd.dart';
+import 'package:forja_servidor/src/correo.dart';
 import 'package:forja_servidor/src/seguridad.dart';
 import 'package:shelf/shelf.dart';
 
 late BaseDatos bd;
 late ForjaApi api;
+late BuzonFalso buzon;
+
+/// Guarda los correos en vez de enviarlos.
+class BuzonFalso implements EnvioCorreo {
+  final enviados = <({String para, String texto})>[];
+
+  @override
+  Future<void> enviar({required String para, required String asunto, required String texto, required String html}) async =>
+      enviados.add((para: para, texto: texto));
+
+  /// El código de 6 cifras del último correo enviado a [para].
+  String codigoPara(String para) =>
+      RegExp(r'\b(\d{6})\b').firstMatch(enviados.lastWhere((c) => c.para == para).texto)!.group(1)!;
+}
 
 Future<({int estado, Map<String, dynamic> json, String texto})> pedir(
   String metodo,
@@ -73,11 +88,12 @@ void main() {
       bd = await BaseDatos.abrir(null);
     } else {
       final limpia = await BaseDatos.conectar(pgUrl);
-      await limpia.ejecutar('DROP TABLE IF EXISTS accesos, mensajes, fichajes, sesiones, usuarios CASCADE');
+      await limpia.ejecutar('DROP TABLE IF EXISTS restablecimientos, accesos, mensajes, fichajes, sesiones, usuarios CASCADE');
       await limpia.cerrar();
       bd = await BaseDatos.conectar(pgUrl);
     }
-    api = ForjaApi(bd);
+    buzon = BuzonFalso();
+    api = ForjaApi(bd, correo: buzon);
   });
   tearDown(() => bd.cerrar());
 
@@ -212,6 +228,67 @@ void main() {
       bd.crearUsuario(email: 'DOBLE@forja.es', nombre: 'Dos', contrasena: 'Clave1234', rol: 'socio'),
       throwsA(isA<CorreoRepetido>()),
     );
+  });
+
+  Future<({int estado, Map<String, dynamic> json, String texto})> olvido(String email) =>
+      pedir('POST', '/api/olvido', cuerpo: {'email': email, 'captchaId': captcha(), 'captcha': 'AB23CD'});
+
+  Future<({int estado, Map<String, dynamic> json, String texto})> restablecer(String email, String codigo,
+          [String nueva = 'Nueva2024x']) =>
+      pedir('POST', '/api/restablecer', cuerpo: {'email': email, 'codigo': codigo, 'nueva': nueva, 'nueva2': nueva});
+
+  test('he olvidado mi contraseña: llega un código al correo y con él se pone otra', () async {
+    final viejo = await registrar('lucia@forja.es');
+    final r = await olvido('lucia@forja.es');
+    expect(r.estado, 200, reason: r.texto);
+    await Future<void>.delayed(Duration.zero); // el envío no se espera
+    expect(buzon.enviados.single.para, 'lucia@forja.es');
+    final codigo = buzon.codigoPara('lucia@forja.es');
+
+    final otro = codigo == '000000' ? '111111' : '000000';
+    expect((await restablecer('lucia@forja.es', otro)).estado, 400);
+    expect((await restablecer('lucia@forja.es', codigo)).estado, 200);
+    // La contraseña cambia en la base de datos y las sesiones abiertas se cierran.
+    expect((await pedir('GET', '/api/yo', token: viejo)).estado, 401);
+    await entrar('lucia@forja.es', 'Nueva2024x');
+    final conVieja = await pedir('POST', '/api/login',
+        cuerpo: {'email': 'lucia@forja.es', 'password': 'Clave1234', 'captchaId': captcha(), 'captcha': 'AB23CD'});
+    expect(conVieja.estado, 401);
+    // El código solo sirve una vez.
+    expect((await restablecer('lucia@forja.es', codigo, 'Otra2024xx')).estado, 400);
+  });
+
+  test('olvido: no revela si el correo existe y exige captcha', () async {
+    final r = await olvido('nadie@forja.es');
+    expect(r.estado, 200);
+    await Future<void>.delayed(Duration.zero);
+    expect(buzon.enviados, isEmpty);
+    final sinCaptcha = await pedir('POST', '/api/olvido', cuerpo: {'email': 'nadie@forja.es'});
+    expect(sinCaptcha.estado, 400);
+    expect((await restablecer('nadie@forja.es', '123456')).estado, 400);
+  });
+
+  test('olvido: cinco códigos mal anulan el código y hay tope de correos', () async {
+    await registrar('lucia@forja.es');
+    await olvido('lucia@forja.es');
+    await Future<void>.delayed(Duration.zero);
+    final codigo = buzon.codigoPara('lucia@forja.es');
+    final malo = codigo == '000000' ? '111111' : '000000';
+    for (var i = 0; i < 5; i++) {
+      expect((await restablecer('lucia@forja.es', malo)).estado, 400);
+    }
+    expect((await restablecer('lucia@forja.es', codigo)).estado, 400, reason: 'tras 5 fallos ya no vale');
+    await olvido('lucia@forja.es');
+    await olvido('lucia@forja.es');
+    expect((await olvido('lucia@forja.es')).estado, 429, reason: 'máximo 3 correos por hora');
+  });
+
+  test('sin envío de correos configurado, olvido responde 503', () async {
+    final sinCorreo = ForjaApi(bd);
+    final r = await sinCorreo.handler(Request('POST', Uri.parse('http://localhost/api/olvido'),
+        body: jsonEncode({'email': 'a@forja.es', 'captchaId': sinCorreo.captchas.crearConTexto('AB23CD'), 'captcha': 'AB23CD'}),
+        headers: {'content-type': 'application/json'}));
+    expect(r.statusCode, 503);
   });
 
   test('el CSV neutraliza fórmulas de hoja de cálculo', () async {

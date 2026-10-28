@@ -175,6 +175,20 @@ class ForjaApi {
   Future<Usuario> yo() async =>
       Usuario.desdeJson((await _pedir('GET', '/api/yo') as Map<String, dynamic>)['usuario'] as Map<String, dynamic>);
 
+  /// Pide el código de restablecimiento. Devuelve el mensaje del servidor.
+  Future<String> olvido({required String email, required String captchaId, required String captcha}) async {
+    final d = await _pedir('POST', '/api/olvido', cuerpo: {'email': email, 'captchaId': captchaId, 'captcha': captcha});
+    return (d as Map)['mensaje'] as String? ?? 'Te hemos enviado un código a tu correo.';
+  }
+
+  Future<void> restablecer({
+    required String email,
+    required String codigo,
+    required String nueva,
+    required String nueva2,
+  }) =>
+      _pedir('POST', '/api/restablecer', cuerpo: {'email': email, 'codigo': codigo, 'nueva': nueva, 'nueva2': nueva2});
+
   Future<void> cambiarContrasena(String actual, String nueva, String nueva2) =>
       _pedir('POST', '/api/contrasena', cuerpo: {'actual': actual, 'nueva': nueva, 'nueva2': nueva2});
 

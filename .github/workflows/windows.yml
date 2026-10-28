@@ -49,7 +49,7 @@ jobs:
         run: flutter test
 
       - name: Compilar
-        run: flutter build windows --release
+        run: flutter build windows --release --dart-define=COMPILACION=${{ github.run_number }}
 
       - name: Crear el instalador .exe
         shell: pwsh
@@ -194,7 +194,7 @@ jobs:
         run: |
           # El número de compilación crece en cada ejecución: Android solo
           # actualiza si la versión nueva no es menor que la instalada.
-          flutter build apk --release --build-number=${{ github.run_number }}
+          flutter build apk --release --build-number=${{ github.run_number }} --dart-define=COMPILACION=${{ github.run_number }}
           cp build/app/outputs/flutter-apk/app-release.apk ForjaApp-Demo.apk
 
       - uses: actions/upload-artifact@v4
@@ -246,7 +246,7 @@ jobs:
 
       - name: Compilar el IPA
         run: |
-          flutter build ios --release --no-codesign --build-number=${{ github.run_number }}
+          flutter build ios --release --no-codesign --build-number=${{ github.run_number }} --dart-define=COMPILACION=${{ github.run_number }}
           mkdir Payload
           cp -R build/ios/iphoneos/Runner.app Payload/
           zip -qry ForjaApp-Demo.ipa Payload
@@ -271,9 +271,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
+          # Las apps miran este número para avisar de que hay versión nueva.
+          echo '{"compilacion": ${{ github.run_number }}}' > version.json
           gh release delete demo --yes --cleanup-tag || true
           gh release create demo ForjaApp-Servidor-Setup.exe ForjaApp-Servidor-portable.zip \
-            ForjaApp-Demo-Setup.exe ForjaApp-Demo-portable.zip ForjaApp-Demo.apk ForjaApp-Demo.ipa \
+            ForjaApp-Demo-Setup.exe ForjaApp-Demo-portable.zip ForjaApp-Demo.apk ForjaApp-Demo.ipa version.json \
             --target "$GITHUB_SHA" \
             --title "ForjaApp - servidor, Windows, Android, iPhone y web" \
             --notes "**Primero, el servidor:** instala ForjaApp-Servidor-Setup.exe en el PC del gimnasio y déjalo abierto. Guarda la base de datos (usuarios, roles, fichajes y mensajes) y sirve la versión web en http://IP-del-PC:8080. La primera vez Windows pregunta por el cortafuegos: permite las redes privadas.

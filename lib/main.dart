@@ -13,6 +13,7 @@ import 'screens/socio.dart';
 import 'servicios/api.dart';
 import 'servicios/sesion.dart' show sesion;
 import 'theme.dart';
+import 'widgets/actualizacion.dart';
 import 'widgets/carga.dart';
 
 Future<void> main() async {
@@ -108,14 +109,16 @@ class _ArranqueState extends State<Arranque> {
       listenable: sesion,
       builder: (context, _) {
         final u = sesion.usuario;
-        return AnimatedSwitcher(
-          duration: Mov.largo,
-          child: !listo
-              ? const _Bienvenida()
-              : u == null
-                  // Sin sesión no se ve nada de la app: primero hay que entrar.
-                  ? const PantallaCuenta(key: ValueKey('cuenta'))
-                  : Inicio(key: ValueKey('inicio-${u.id}'), store: widget.store),
+        return AvisoActualizacion(
+          child: AnimatedSwitcher(
+            duration: Mov.largo,
+            child: !listo
+                ? const _Bienvenida()
+                : u == null
+                    // Sin sesión no se ve nada de la app: primero hay que entrar.
+                    ? const PantallaCuenta(key: ValueKey('cuenta'))
+                    : Inicio(key: ValueKey('inicio-${u.id}'), store: widget.store),
+          ),
         );
       },
     );

@@ -36,6 +36,13 @@ class Sesion extends ChangeNotifier {
   Future<void> cargar() async {
     try {
       final p = await SharedPreferences.getInstance();
+      // Las versiones anteriores al servidor de internet guardaban la
+      // dirección del PC del gimnasio (o ninguna): se cambia una sola vez
+      // al de internet al actualizar la app.
+      if (p.getInt('servidor_v') != 2) {
+        await p.remove('servidor');
+        await p.setInt('servidor_v', 2);
+      }
       final guardado = p.getString('servidor');
       if (guardado != null && guardado.isNotEmpty && !_webDeUnServidor) api.base = guardado;
       ultimoCorreo = p.getString('correo') ?? '';

@@ -451,7 +451,13 @@ class _FormLoginState extends State<_FormLogin> {
         ),
         const SizedBox(height: Esp.m),
         CampoContrasena(controller: clave, etiqueta: 'Contraseña', autofill: const [AutofillHints.password]),
-        const SizedBox(height: Esp.l),
+        Align(
+          alignment: Alignment.centerRight,
+          child: TextButton(
+            onPressed: () => restablecerContrasena(context, correo.text.trim()),
+            child: const Text('¿Has olvidado tu contraseña?'),
+          ),
+        ),
         Captcha(controller: captcha),
         const SizedBox(height: Esp.xl),
         _botonEnviar(texto: 'Iniciar sesión', enviando: enviando, alPulsar: _entrar),
@@ -460,6 +466,191 @@ class _FormLoginState extends State<_FormLogin> {
           const Text('¿Aún no tienes cuenta?', style: Txt.secundario),
           TextButton(onPressed: widget.alCambiar, child: const Text('Regístrate')),
         ]),
+      ],
+    );
+  }
+}
+
+// ----------------------------------------------- he olvidado mi contraseña
+
+/// Dos pasos: se pide un código al correo de la cuenta y, con ese código,
+/// se pone una contraseña nueva (la antigua no se puede enviar: el servidor
+/// solo guarda su huella, no la contraseña).
+Future<void> restablecerContrasena(BuildContext context, String correoInicial) async {
+  final cambiada = await showDialog<String>(
+    context: context,
+    barrierDismissible: false,
+    builder: (_) => _DialogoRestablecer(correoInicial: correoInicial),
+  );
+  if (cambiada != null && context.mounted) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Contraseña cambiada. Ya puedes iniciar sesión con la nueva.')),
+    );
+  }
+}
+
+class _DialogoRestablecer extends StatefulWidget {
+  const _DialogoRestablecer({required this.correoInicial});
+  final String correoInicial;
+
+  @override
+  State<_DialogoRestablecer> createState() => _DialogoRestablecerState();
+}
+
+class _DialogoRestablecerState extends State<_DialogoRestablecer> {
+  late final correo = TextEditingController(text: widget.correoInicial);
+  final codigo = TextEditingController();
+  final nueva = TextEditingController();
+  final nueva2 = TextEditingController();
+  final captcha = ControladorCaptcha();
+  bool codigoEnviado = false;
+  bool enviando = false;
+  String? error;
+  String? aviso;
+
+  @override
+  void dispose() {
+    for (final c in [correo, codigo, nueva, nueva2]) {
+      c.dispose();
+    }
+    captcha.dispose();
+    super.dispose();
+  }
+
+  Future<void> _pedirCodigo() async {
+    final email = correo.text.trim();
+    if (!email.contains('@')) {
+      setState(() => error = 'Escribe el correo de tu cuenta.');
+      return;
+    }
+    if (captcha.id == null || captcha.texto.text.trim().length != 6) {
+      setState(() => error = 'Escribe los 6 caracteres de la imagen de verificación.');
+      return;
+    }
+    setState(() {
+      enviando = true;
+      error = null;
+    });
+    try {
+      final m = await sesion.api.olvido(email: email, captchaId: captcha.id!, captcha: captcha.texto.text.trim());
+      if (!mounted) return;
+      setState(() {
+        codigoEnviado = true;
+        aviso = m;
+      });
+    } on ErrorServidor catch (e) {
+      if (!mounted) return;
+      setState(() => error = e.mensaje);
+      captcha.nuevo();
+    } finally {
+      if (mounted) setState(() => enviando = false);
+    }
+  }
+
+  Future<void> _cambiar() async {
+    if (!RegExp(r'^\d{6}$').hasMatch(codigo.text.trim())) {
+      setState(() => error = 'Escribe el código de 6 cifras que te ha llegado al correo.');
+      return;
+    }
+    if (nueva.text != nueva2.text) {
+      setState(() => error = 'Las contraseñas nuevas no coinciden.');
+      return;
+    }
+    setState(() {
+      enviando = true;
+      error = null;
+    });
+    try {
+      await sesion.api.restablecer(
+        email: correo.text.trim(),
+        codigo: codigo.text.trim(),
+        nueva: nueva.text,
+        nueva2: nueva2.text,
+      );
+      if (mounted) Navigator.pop(context, correo.text.trim());
+    } on ErrorServidor catch (e) {
+      if (mounted) setState(() => error = e.mensaje);
+    } finally {
+      if (mounted) setState(() => enviando = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Restablecer la contraseña'),
+      content: SizedBox(
+        width: 440,
+        child: SingleChildScrollView(
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            _Error(error),
+            if (!codigoEnviado) ...[
+              const Text(
+                'Escribe el correo de tu cuenta y te enviaremos un código de 6 cifras para crear una contraseña nueva.',
+                style: Txt.secundario,
+              ),
+              const SizedBox(height: Esp.l),
+              TextField(
+                controller: correo,
+                keyboardType: TextInputType.emailAddress,
+                autocorrect: false,
+                maxLength: 254,
+                decoration: const InputDecoration(
+                    labelText: 'Correo electrónico', counterText: '', prefixIcon: Icon(Icons.alternate_email_rounded)),
+              ),
+              const SizedBox(height: Esp.l),
+              Captcha(controller: captcha),
+            ] else ...[
+              if (aviso != null)
+                Nota(aviso!, icono: Icons.mark_email_read_outlined, color: Forja.verde, fondo: Forja.verdeSuave),
+              const SizedBox(height: Esp.l),
+              TextField(
+                controller: codigo,
+                keyboardType: TextInputType.number,
+                maxLength: 6,
+                autofillHints: const [AutofillHints.oneTimeCode],
+                decoration: const InputDecoration(
+                    labelText: 'Código del correo', counterText: '', prefixIcon: Icon(Icons.pin_outlined)),
+              ),
+              const SizedBox(height: Esp.m),
+              CampoContrasena(
+                controller: nueva,
+                etiqueta: 'Contraseña nueva',
+                ayuda: 'Al menos 8 caracteres, con letras y números.',
+                autofill: const [AutofillHints.newPassword],
+              ),
+              const SizedBox(height: Esp.m),
+              CampoContrasena(
+                controller: nueva2,
+                etiqueta: 'Repite la contraseña nueva',
+                autofill: const [AutofillHints.newPassword],
+                alEnviar: _cambiar,
+              ),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton(
+                  onPressed: enviando
+                      ? null
+                      : () => setState(() {
+                            codigoEnviado = false;
+                            error = null;
+                            captcha.nuevo();
+                          }),
+                  child: const Text('No me ha llegado: pedir otro código'),
+                ),
+              ),
+            ],
+          ]),
+        ),
+      ),
+      actions: [
+        TextButton(onPressed: enviando ? null : () => Navigator.pop(context), child: const Text('Cancelar')),
+        FilledButton(
+          onPressed: enviando ? null : (codigoEnviado ? _cambiar : _pedirCodigo),
+          child: enviando
+              ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white))
+              : Text(codigoEnviado ? 'Cambiar contraseña' : 'Enviar código'),
+        ),
       ],
     );
   }
